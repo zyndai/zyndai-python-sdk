@@ -1,6 +1,6 @@
 # ZyndAI Agent SDK
 
-A powerful Python SDK that enables AI agents to communicate securely and discover each other on the ZyndAI Network. Built with **encrypted communication**, **identity verification**, and **agent discovery** at its core.
+A powerful Python SDK that enables AI agents to communicate securely and discover each other on the ZyndAI Network. Built with **encrypted communication**, **identity verification**, **agent discovery**, and **x402 micropayments** at its core.
 
 ## 🚀 Features
 
@@ -8,19 +8,18 @@ A powerful Python SDK that enables AI agents to communicate securely and discove
 - 🔍 **Smart Agent Discovery**: Search and discover agents based on their capabilities with ML-powered semantic matching
 - 💬 **Encrypted MQTT Communication**: End-to-end encrypted real-time messaging between agents
 - 🤖 **LangChain Integration**: Seamlessly works with LangChain agents and any LLM
+- 💰 **x402 Micropayments**: Built-in support for pay-per-use API endpoints with automatic payment handling
 - 🌐 **Decentralized Network**: Connect to the global ZyndAI agent network
 - ⚡ **Easy Setup**: Get started in minutes with simple configuration
 
 ## 📦 Installation
 
 Install from PyPI (recommended):
-
 ```bash
 pip install zyndai-agent
 ```
 
 Or install from source:
-
 ```bash
 git clone https://github.com/P3-AI-Network/zyndai-agent.git
 cd zyndai-agent
@@ -38,14 +37,12 @@ pip install -r requirements.txt
 ### 2. Environment Setup
 
 Create a `.env` file:
-
 ```env
 AGENT_SEED=your_secret_seed_here
 OPENAI_API_KEY=your_openai_api_key_here
 ```
 
 ### 3. Basic Agent Example
-
 ```python
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from langchain_openai import ChatOpenAI
@@ -87,10 +84,206 @@ if agents:
 
 ## 🎯 Core Components
 
-### Agent Discovery
+### 💰 x402 Micropayment Support
+
+Access pay-per-use APIs with automatic payment handling using the x402 protocol. The SDK seamlessly handles payment challenges, signature generation, and request retries.
+
+#### Basic x402 Usage
+```python
+from zyndai_agent.agent import AgentConfig, ZyndAIAgent
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+# Configure your agent
+agent_config = AgentConfig(
+    default_outbox_topic=None,
+    auto_reconnect=True,
+    message_history_limit=100,
+    registry_url="https://registry.zynd.ai",
+    mqtt_broker_url="mqtt://registry.zynd.ai:1883",
+    identity_credential_path="./identity_credential.json",
+    secret_seed=os.environ["AGENT_SEED"]
+)
+
+# Initialize ZyndAI Agent
+zyndai_agent = ZyndAIAgent(agent_config=agent_config)
+
+# Make a POST request to an x402 endpoint
+response = zyndai_agent.x402_processor.post("http://localhost:3000/api/pay")
+print(response.json())
+
+# Make a GET request to an x402 endpoint
+response = zyndai_agent.x402_processor.get("http://api.example.com/data")
+print(response.json())
+```
+
+#### What x402 Does Automatically
+
+- ✅ **Payment Challenge/Response Flow**: Handles the entire payment negotiation
+- ✅ **Signature Generation**: Creates cryptographic signatures for authentication
+- ✅ **Retry Logic**: Automatically retries requests after payment verification
+- ✅ **Error Handling**: Gracefully manages payment failures and network issues
+
+#### x402 with Custom Data and Headers
+```python
+# POST request with JSON payload
+data = {
+    "prompt": "Analyze this text for sentiment",
+    "text": "The product exceeded my expectations!",
+    "model": "advanced"
+}
+
+response = zyndai_agent.x402_processor.post(
+    url="https://api.sentiment-ai.com/analyze",
+    json=data
+)
+
+result = response.json()
+print(f"Sentiment: {result['sentiment']}")
+print(f"Confidence: {result['confidence']}")
+print(f"Cost: {result['tokens_used']} tokens")
+```
+```python
+# GET request with query parameters
+response = zyndai_agent.x402_processor.get(
+    url="https://api.market-data.com/stock",
+    params={"symbol": "AAPL", "range": "1d"}
+)
+
+stock_data = response.json()
+print(f"Current Price: ${stock_data['price']}")
+```
+```python
+# Custom headers
+headers = {
+    "X-API-Version": "2.0",
+    "X-Client-Id": "my-app"
+}
+
+response = zyndai_agent.x402_processor.post(
+    url="https://api.premium-service.com/process",
+    json={"data": "payload"},
+    headers=headers
+)
+```
+
+#### Supported HTTP Methods
+```python
+# GET
+response = zyndai_agent.x402_processor.get(url, params={}, headers={})
+
+# POST
+response = zyndai_agent.x402_processor.post(url, json={}, headers={})
+
+# PUT
+response = zyndai_agent.x402_processor.put(url, json={}, headers={})
+
+# DELETE
+response = zyndai_agent.x402_processor.delete(url, headers={})
+```
+
+#### x402 Integration with LangChain Tools
+
+Create LangChain tools that leverage x402-enabled paid APIs:
+```python
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
+from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from zyndai_agent.agent import AgentConfig, ZyndAIAgent
+import os
+
+# Initialize agent
+agent_config = AgentConfig(
+    registry_url="https://registry.zynd.ai",
+    mqtt_broker_url="mqtt://registry.zynd.ai:1883",
+    identity_credential_path="./identity_credential.json",
+    secret_seed=os.environ["AGENT_SEED"]
+)
+zyndai_agent = ZyndAIAgent(agent_config=agent_config)
+
+@tool
+def get_premium_market_data(symbol: str) -> str:
+    """Fetch real-time premium market data for a stock symbol"""
+    response = zyndai_agent.x402_processor.get(
+        url="https://api.premium-data.com/stock",
+        params={"symbol": symbol}
+    )
+    data = response.json()
+    return f"Stock: {symbol}, Price: ${data['price']}, Volume: {data['volume']}"
+
+@tool
+def analyze_sentiment(text: str) -> str:
+    """Analyze sentiment using a premium AI service"""
+    response = zyndai_agent.x402_processor.post(
+        url="https://api.sentiment-ai.com/analyze",
+        json={"text": text}
+    )
+    result = response.json()
+    return f"Sentiment: {result['sentiment']} (confidence: {result['confidence']})"
+
+@tool
+def generate_market_report(sector: str) -> str:
+    """Generate a comprehensive market report for a sector"""
+    response = zyndai_agent.x402_processor.post(
+        url="https://api.reports.com/generate",
+        json={"sector": sector, "depth": "comprehensive"}
+    )
+    return response.json()["report"]
+
+# Create LangChain agent with x402-enabled tools
+llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+tools = [get_premium_market_data, analyze_sentiment, generate_market_report]
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", """You are a financial analysis agent with access to premium paid APIs.
+    Use the available tools to provide comprehensive market analysis.
+    Always cite the data sources and be clear about costs."""),
+    MessagesPlaceholder(variable_name="chat_history"),
+    ("human", "{input}"),
+    MessagesPlaceholder(variable_name="agent_scratchpad")
+])
+
+agent = create_tool_calling_agent(llm, tools, prompt)
+agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+
+# Use the agent
+response = agent_executor.invoke({
+    "input": "Give me a detailed analysis of Apple stock with sentiment analysis of recent news"
+})
+print(response["output"])
+```
+
+#### x402 Error Handling
+```python
+try:
+    response = zyndai_agent.x402_processor.post(
+        url="https://api.paid-service.com/endpoint",
+        json={"data": "payload"}
+    )
+    result = response.json()
+    print(f"Success: {result}")
+    
+except requests.exceptions.HTTPError as e:
+    if e.response.status_code == 402:
+        print("Payment required but failed to process")
+    elif e.response.status_code == 401:
+        print("Authentication failed")
+    else:
+        print(f"HTTP Error: {e}")
+        
+except requests.exceptions.ConnectionError:
+    print("Failed to connect to the API endpoint")
+    
+except Exception as e:
+    print(f"Unexpected error: {e}")
+```
+
+### 🔍 Agent Discovery
 
 Find agents based on their capabilities using ML-powered semantic matching:
-
 ```python
 # Search for agents with specific capabilities
 agents = zyndai_agent.search_agents_by_capabilities(
@@ -107,10 +300,9 @@ for agent in agents:
     print("---")
 ```
 
-### Secure Communication
+### 💬 Secure Communication
 
 All messages are end-to-end encrypted using ECIES (Elliptic Curve Integrated Encryption Scheme):
-
 ```python
 # Connect to a discovered agent
 zyndai_agent.connect_agent(selected_agent)
@@ -125,10 +317,9 @@ result = zyndai_agent.send_message(
 messages = zyndai_agent.read_messages()
 ```
 
-### Identity Verification
+### 🔐 Identity Verification
 
 Verify other agents' identities before trusting them:
-
 ```python
 # Verify an agent's identity
 is_verified = zyndai_agent.verify_agent_identity(agent_credential)
@@ -143,51 +334,76 @@ my_identity = zyndai_agent.get_identity_document()
 
 ## 💡 Advanced Examples
 
-### Multi-Agent Orchestration
+### Multi-Agent Orchestration with x402 APIs
 
-Build sophisticated workflows that coordinate multiple agents:
-
+Build sophisticated workflows that coordinate multiple agents and paid services:
 ```python
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.communication import MQTTMessage
 from time import sleep
+import json
 
-class StockOrchestrator:
+class MarketAnalysisOrchestrator:
     def __init__(self, zyndai_agent):
         self.zyndai_agent = zyndai_agent
-        self.stock_data_agent = None
-        self.comparison_agent = None
         
-    def process_comparison_request(self, symbols):
-        # Step 1: Find and connect to stock data agent
-        data_agents = self.zyndai_agent.search_agents_by_capabilities(
-            ["stock_data_retrieval"]
+    def comprehensive_market_analysis(self, stock_symbol):
+        # Step 1: Fetch real-time market data via x402
+        print(f"📊 Fetching market data for {stock_symbol}...")
+        market_response = self.zyndai_agent.x402_processor.get(
+            url="https://api.market-data.com/stock",
+            params={"symbol": stock_symbol, "include": "fundamentals"}
         )
-        self.stock_data_agent = data_agents[0]
-        self.zyndai_agent.connect_agent(self.stock_data_agent)
+        market_data = market_response.json()
         
-        # Step 2: Get stock data
-        stock_data = []
-        for symbol in symbols:
-            self.zyndai_agent.send_message(f"Get stock price data for {symbol}")
-            sleep(2)  # Wait for response
-            messages = self.zyndai_agent.read_messages()
-            stock_data.append(messages)
-        
-        # Step 3: Find and connect to comparison agent
-        comparison_agents = self.zyndai_agent.search_agents_by_capabilities(
-            ["stock_comparison"]
+        # Step 2: Get news sentiment via x402
+        print("📰 Analyzing news sentiment...")
+        news_response = self.zyndai_agent.x402_processor.post(
+            url="https://api.news-sentiment.com/analyze",
+            json={"symbol": stock_symbol, "days": 7}
         )
-        self.comparison_agent = comparison_agents[0]
-        self.zyndai_agent.connect_agent(self.comparison_agent)
+        sentiment_data = news_response.json()
         
-        # Step 4: Request comparison
-        combined_data = "\n".join(stock_data)
-        self.zyndai_agent.send_message(f"Compare these stocks:\n{combined_data}")
-        sleep(2)
+        # Step 3: Find and connect to technical analysis agent
+        print("🔍 Finding technical analysis agent...")
+        tech_agents = self.zyndai_agent.search_agents_by_capabilities(
+            ["technical_analysis", "trading_signals"]
+        )
         
-        # Step 5: Get and return results
-        return self.zyndai_agent.read_messages()
+        if tech_agents:
+            self.zyndai_agent.connect_agent(tech_agents[0])
+            
+            # Send market data to technical analyst
+            message_content = json.dumps({
+                "symbol": stock_symbol,
+                "price_data": market_data["price_history"],
+                "volume": market_data["volume"]
+            })
+            
+            self.zyndai_agent.send_message(
+                f"Perform technical analysis: {message_content}"
+            )
+            sleep(3)
+            tech_analysis = self.zyndai_agent.read_messages()
+        
+        # Step 4: Generate AI-powered investment thesis via x402
+        print("🤖 Generating investment thesis...")
+        thesis_response = self.zyndai_agent.x402_processor.post(
+            url="https://api.ai-finance.com/thesis",
+            json={
+                "symbol": stock_symbol,
+                "market_data": market_data,
+                "sentiment": sentiment_data,
+                "technical_analysis": tech_analysis
+            }
+        )
+        
+        return {
+            "market_data": market_data,
+            "sentiment": sentiment_data,
+            "technical_analysis": tech_analysis,
+            "investment_thesis": thesis_response.json()
+        }
 
 # Usage
 agent_config = AgentConfig(
@@ -198,21 +414,21 @@ agent_config = AgentConfig(
 )
 
 zyndai_agent = ZyndAIAgent(agent_config=agent_config)
-orchestrator = StockOrchestrator(zyndai_agent)
+orchestrator = MarketAnalysisOrchestrator(zyndai_agent)
 
-result = orchestrator.process_comparison_request(["AAPL", "GOOGL"])
-print(result)
+result = orchestrator.comprehensive_market_analysis("AAPL")
+print(json.dumps(result, indent=2))
 ```
 
 ### Creating a Specialized Agent with Custom Tools
-
 ```python
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.communication import MQTTMessage
 from langchain_openai import ChatOpenAI
-from langchain.tools import tool
-from langchain.agents import create_openai_functions_agent, AgentExecutor
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.tools import tool
+from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.memory import ConversationBufferMemory
 import json
 
 @tool
@@ -244,7 +460,7 @@ Stock Comparison Analysis:
 - Volume: {stock1['volume']} vs {stock2['volume']}
 - Market Cap: {stock1['market_cap']} vs {stock2['market_cap']}
 
-Recommendation: Based on today's performance...
+Recommendation: Based on today's performance, {stock1['symbol'] if float(stock1['change'].strip('%+')) > float(stock2['change'].strip('%+')) else stock2['symbol']} shows stronger momentum.
         """
         
         return comparison
@@ -264,6 +480,7 @@ zyndai_agent = ZyndAIAgent(agent_config=agent_config)
 # Create LangChain agent with custom tool
 llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 tools = [compare_stocks]
+memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", """You are a Stock Comparison Agent. 
@@ -274,8 +491,8 @@ prompt = ChatPromptTemplate.from_messages([
     MessagesPlaceholder(variable_name="agent_scratchpad")
 ])
 
-agent = create_openai_functions_agent(llm, tools, prompt)
-agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+agent = create_tool_calling_agent(llm, tools, prompt)
+agent_executor = AgentExecutor(agent=agent, tools=tools, memory=memory, verbose=True)
 
 zyndai_agent.set_agent_executor(agent_executor)
 
@@ -288,6 +505,12 @@ def message_handler(message: MQTTMessage, topic: str):
 zyndai_agent.add_message_handler(message_handler)
 
 print("Stock Comparison Agent is running...")
+print("Waiting for messages...")
+
+# Keep agent running
+from time import sleep
+while True:
+    sleep(1)
 ```
 
 ## ⚙️ Configuration Options
@@ -322,6 +545,12 @@ Organize your communication with different message types:
 - AES-256-CBC for symmetric encryption
 - Compatible with Polygon ID AuthBJJ credentials
 
+### x402 Payment Security
+- Cryptographic signature-based authentication
+- Secure payment challenge/response protocol
+- No exposure of private keys during transactions
+- Built-in protection against replay attacks
+
 ### Identity Verification
 - Decentralized Identity (DID) based authentication
 - Cryptographic proof of agent identity
@@ -337,7 +566,6 @@ Organize your communication with different message types:
 ## 🌐 Agent Discovery Response Format
 
 When you search for agents, you receive detailed information:
-
 ```python
 {
     'id': 'unique-agent-id',
@@ -356,7 +584,6 @@ When you search for agents, you receive detailed information:
 ### Custom Message Handlers
 
 Add custom logic for incoming messages:
-
 ```python
 def handle_incoming_message(message: MQTTMessage, topic: str):
     print(f"Received from {message.sender_id}: {message.content}")
@@ -365,12 +592,19 @@ def handle_incoming_message(message: MQTTMessage, topic: str):
     if "urgent" in message.content.lower():
         zyndai_agent.send_message("I'll prioritize this request!", 
                                    message_type="response")
+    
+    # Handle different message types
+    if message.message_type == "query":
+        # Process query
+        pass
+    elif message.message_type == "broadcast":
+        # Handle broadcast
+        pass
 
 zyndai_agent.add_message_handler(handle_incoming_message)
 ```
 
 ### Connection Status Monitoring
-
 ```python
 status = zyndai_agent.get_connection_status()
 print(f"Agent ID: {status['agent_id']}")
@@ -380,7 +614,6 @@ print(f"Pending Messages: {status['pending_messages']}")
 ```
 
 ### Message History Management
-
 ```python
 # Get recent message history
 history = zyndai_agent.get_message_history(limit=10)
@@ -397,7 +630,6 @@ for entry in history:
 ```
 
 ### Topic Management
-
 ```python
 # Subscribe to additional topics
 zyndai_agent.subscribe_to_topic("announcements/all")
@@ -427,9 +659,9 @@ print(status['subscribed_topics'])
 ## 🐛 Error Handling
 
 The SDK includes comprehensive error handling:
-
 ```python
 from zyndai_agent.agent import ZyndAIAgent, AgentConfig
+import requests
 
 try:
     agent_config = AgentConfig(
@@ -440,12 +672,25 @@ try:
     )
     
     zyndai_agent = ZyndAIAgent(agent_config)
+    
+    # Agent discovery
     agents = zyndai_agent.search_agents_by_capabilities(["nlp"])
+    
+    # x402 request
+    response = zyndai_agent.x402_processor.post(
+        url="https://api.paid-service.com/analyze",
+        json={"data": "payload"}
+    )
     
 except FileNotFoundError as e:
     print(f"❌ Credential file not found: {e}")
 except ValueError as e:
     print(f"❌ Invalid configuration or decryption failed: {e}")
+except requests.exceptions.HTTPError as e:
+    if e.response.status_code == 402:
+        print(f"❌ Payment required: {e}")
+    else:
+        print(f"❌ HTTP error: {e}")
 except RuntimeError as e:
     print(f"❌ Network error: {e}")
 except Exception as e:
@@ -453,7 +698,6 @@ except Exception as e:
 ```
 
 ## 📊 Architecture Overview
-
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                   ZyndAI Agent SDK                       │
@@ -477,6 +721,15 @@ except Exception as e:
 │  └──────────────────────────────────────────┘          │
 │                                                          │
 │  ┌──────────────────────────────────────────┐          │
+│  │        x402 Payment Processor             │          │
+│  │                                           │          │
+│  │  - Payment Challenge Handling            │          │
+│  │  - Signature Generation                  │          │
+│  │  - Automatic Retry Logic                 │          │
+│  │  - Multi-Method Support (GET/POST/etc)   │          │
+│  └──────────────────────────────────────────┘          │
+│                                                          │
+│  ┌──────────────────────────────────────────┐          │
 │  │        LangChain Integration              │          │
 │  │                                           │          │
 │  │  - Agent Executor Support                │          │
@@ -489,6 +742,11 @@ except Exception as e:
     │   Registry   │          │ MQTT Broker  │
     │   Service    │          │              │
     └──────────────┘          └──────────────┘
+            ▼
+    ┌──────────────┐
+    │ x402 Enabled │
+    │   Services   │
+    └──────────────┘
 ```
 
 ## 🤝 Contributing
@@ -502,7 +760,6 @@ We welcome contributions! Here's how to get started:
 5. Submit a pull request
 
 ### Development Setup
-
 ```bash
 git clone https://github.com/P3-AI-Network/zyndai-agent.git
 cd zyndai-agent
@@ -513,32 +770,36 @@ pip install -r requirements-dev.txt
 ```
 
 ### Running Tests
-
 ```bash
 pytest tests/ -v
 pytest tests/test_communication.py -k "test_encryption"
+pytest tests/test_x402.py -k "test_payment_flow"
 ```
 
 ## 📚 Example Use Cases
 
-### 1. Research Assistant Network
-Connect multiple research agents to collaboratively analyze papers, summarize findings, and generate insights.
+### 1. AI-Powered Research Network
+Connect multiple research agents with access to premium academic databases via x402, collaboratively analyzing papers and generating insights.
 
-### 2. Data Pipeline Orchestration
-Build data processing workflows where agents handle different stages: ingestion, transformation, analysis, and reporting.
+### 2. Financial Analysis Pipeline
+Build workflows combining free agent communication with paid market data APIs, sentiment analysis services, and AI-powered investment recommendations.
 
-### 3. Customer Service Automation
-Deploy specialized agents for different domains (technical support, billing, general inquiries) that seamlessly hand off conversations.
+### 3. Multi-Modal Data Processing
+Orchestrate agents that handle different stages: data ingestion from x402 sources, transformation, analysis by specialized agents, and automated reporting.
 
-### 4. Trading Strategy Development
-Create agents for market data retrieval, technical analysis, sentiment analysis, and trade execution that work together.
+### 4. Premium Customer Service
+Deploy specialized agents that can access paid knowledge bases, translation services, and sentiment analysis APIs while coordinating responses.
 
-### 5. Content Generation Pipeline
-Orchestrate agents for research, writing, editing, fact-checking, and publishing content.
+### 5. Trading Strategy Development
+Create agents for real-time market data (x402), technical analysis by agents, sentiment from paid news APIs, and coordinated trade execution.
+
+### 6. Content Generation with Fact-Checking
+Orchestrate agents for research, writing, accessing paid fact-checking APIs via x402, and publishing verified content.
 
 ## 🆘 Support & Community
 
 - **GitHub Issues**: [Report bugs or request features](https://github.com/P3-AI-Network/zyndai-agent/issues)
+- **Documentation**: [Full API Documentation](https://docs.zynd.ai)
 - **Email**: p3ainetwork@gmail.com
 - **Twitter**: [@ZyndAI](https://x.com/ZyndAI)
 
@@ -552,20 +813,28 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Uses [Paho MQTT](https://www.eclipse.org/paho/) for reliable messaging
 - Cryptography powered by [cryptography](https://cryptography.io/) library
 - Decentralized Identity via [Polygon ID](https://polygon.technology/polygon-id)
+- x402 micropayment protocol for seamless API monetization
 - Semantic search using ML-powered capability matching
 
 ## 🗺️ Roadmap
 
+- [x] Core agent communication and discovery
+- [x] End-to-end encryption
+- [x] LangChain integration
+- [x] x402 micropayment support
 - [ ] Support for additional LLM providers (Anthropic, Cohere, etc.)
-- [ ] Web dashboard for agent monitoring
+- [ ] Web dashboard for agent monitoring and payment tracking
 - [ ] Advanced orchestration patterns (workflows, state machines)
 - [ ] Integration with popular data sources (APIs, databases)
 - [ ] Multi-language support (JavaScript, Go, Rust)
 - [ ] Enhanced security features (rate limiting, access control)
 - [ ] Performance optimizations for high-throughput scenarios
+- [ ] x402 payment analytics and budgeting tools
 
 ---
 
-**Ready to build the future of AI agent collaboration?** 
+**Ready to build the future of AI agent collaboration with micropayments?** 
 
 Get started today: `pip install zyndai-agent` 🚀
+
+**Questions about x402 integration?** Check out our [x402 documentation](https://docs.zynd.ai/x402) or join our community!

@@ -3,9 +3,11 @@ import requests
 from zyndai_agent.search import SearchAndDiscoveryManager
 from zyndai_agent.identity import IdentityManager
 from zyndai_agent.communication import AgentCommunicationManager
+from zyndai_agent.payment import X402PaymentProcessor
 from pydantic import BaseModel
 from typing import Optional
-from langchain.agents import AgentExecutor
+from langchain.agents import create_agent
+from langgraph.graph.state import CompiledStateGraph
 
 class AgentConfig(BaseModel):
     auto_reconnect: bool = True
@@ -17,13 +19,13 @@ class AgentConfig(BaseModel):
     default_outbox_topic: Optional[str] = None
     secret_seed: str = None
 
-class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, AgentCommunicationManager):
+class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, AgentCommunicationManager, X402PaymentProcessor):
 
     def __init__(self, agent_config: AgentConfig): 
 
-        self.agent_executor = None
+        self.agent_executor: CompiledStateGraph = None
         self.agent_config = agent_config 
-        self.agent_executor: AgentExecutor = None
+        self.x402_processor = X402PaymentProcessor(agent_config.secret_seed)
 
         try:
             with open(agent_config.identity_credential_path, "r") as f:
@@ -48,13 +50,13 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, AgentCommunication
             identity_credential=self.identity_credential,
             secret_seed=agent_config.secret_seed,
             mqtt_broker_url=agent_config.mqtt_broker_url
-        )   
+        )
 
         self.update_agent_mqtt_info()
 
 
 
-    def set_agent_executor(self, agent_executor: AgentExecutor):
+    def set_agent_executor(self, agent_executor: CompiledStateGraph):
         """Set the agent executor for the agent."""
         self.agent_executor = agent_executor 
 

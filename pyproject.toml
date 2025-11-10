@@ -1,6 +1,6 @@
 [project]
 name = "zyndai-agent"
-version = "0.1.3"
+version = "0.1.4"
 description = "A Langchain and Autogen wrapper that enables agents to communicate and establish identity on the Zynd AI Network. This SDK provides three core capabilities: Identity Management, Agent Discovery & Search, and MQTT-based Communication."
 authors = [
     { name = "Swapnil Shinde", email = "swapnilshinde9382@gmail.com" }
@@ -10,8 +10,10 @@ requires-python = ">=3.12"
 dependencies = [
     "base58>=2.1.1",
     "cryptography>=46.0.3",
-    "langchain>=1.0.4",
+    "eth-account>=0.13.7",
+    "langchain<1.0.4",
     "langchain-core>=1.0.3",
     "langchain-openai>=1.0.2",
     "paho-mqtt>=2.1.0",
+    "x402>=0.2.1",
 ]
