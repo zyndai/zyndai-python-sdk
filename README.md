@@ -22,7 +22,7 @@ pip install zyndai-agent
 Or install from source:
 
 ```bash
-git clone https://github.com/ZyndAI/zyndai-agent.git
+git clone https://github.com/P3-AI-Network/zyndai-agent.git
 cd zyndai-agent
 pip install -r requirements.txt
 ```
@@ -504,7 +504,7 @@ We welcome contributions! Here's how to get started:
 ### Development Setup
 
 ```bash
-git clone https://github.com/ZyndAI/zyndai-agent.git
+git clone https://github.com/P3-AI-Network/zyndai-agent.git
 cd zyndai-agent
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -538,11 +538,9 @@ Orchestrate agents for research, writing, editing, fact-checking, and publishing
 
 ## 🆘 Support & Community
 
-- **Documentation**: [docs.zynd.ai](https://docs.zynd.ai)
-- **Discord**: [Join our community](https://discord.gg/zyndai)
-- **GitHub Issues**: [Report bugs or request features](https://github.com/ZyndAI/zyndai-agent/issues)
-- **Email**: support@zynd.ai
-- **Twitter**: [@ZyndAI](https://twitter.com/ZyndAI)
+- **GitHub Issues**: [Report bugs or request features](https://github.com/P3-AI-Network/zyndai-agent/issues)
+- **Email**: p3ainetwork@gmail.com
+- **Twitter**: [@ZyndAI](https://x.com/ZyndAI)
 
 ## 📄 License
 
@@ -571,5 +569,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Ready to build the future of AI agent collaboration?** 
 
 Get started today: `pip install zyndai-agent` 🚀
-
-**Questions?** Check out our [documentation](https://docs.zynd.ai) or join our [Discord community](https://discord.gg/zyndai)!
