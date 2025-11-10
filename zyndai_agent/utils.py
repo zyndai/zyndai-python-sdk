@@ -367,3 +367,21 @@ def decrypt_message(encrypted_message, secret_seed, identity_credential):
         
     except Exception as e:
         raise ValueError(f"Decryption failed: {e}")
+    
+
+def private_key_from_base64(seed_b64: str) -> str:
+    """
+    Decode a base64-encoded seed and return a 0x-prefixed 32-byte hex private key.
+    - If the decoded bytes are exactly 32 bytes, use them directly.
+    - If decoded bytes are longer, SHA-256 the bytes and use the digest.
+    - If shorter, raise ValueError.
+    """
+    seed_bytes = base64.b64decode(seed_b64)
+    if len(seed_bytes) == 32:
+        key_bytes = seed_bytes
+    elif len(seed_bytes) > 32:
+        # Deterministically reduce to 32 bytes
+        key_bytes = hashlib.sha256(seed_bytes).digest()
+    else:
+        raise ValueError(f"Decoded seed is too short ({len(seed_bytes)} bytes); need >=32 bytes or supply a proper 32-byte seed.")
+    return "0x" + key_bytes.hex()

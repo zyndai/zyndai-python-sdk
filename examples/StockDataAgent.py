@@ -2,10 +2,9 @@ from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.communication import MQTTMessage
 from langchain_openai import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
-from langchain.agents import initialize_agent, AgentType
-from langchain.tools import tool
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.agents import AgentExecutor, create_openai_functions_agent
+from langchain_core.tools import tool
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.agents import create_tool_calling_agent, AgentExecutor
 
 from dotenv import load_dotenv
 import os
@@ -82,7 +81,8 @@ if __name__ == "__main__":
         MessagesPlaceholder(variable_name="agent_scratchpad")
     ])
     
-    agent = create_openai_functions_agent(llm, tools, prompt)
+    # Use create_tool_calling_agent instead of create_openai_functions_agent
+    agent = create_tool_calling_agent(llm, tools, prompt)
     agent_executor = AgentExecutor(agent=agent, tools=tools, memory=memory, verbose=True)
 
     p3_agent.set_agent_executor(agent_executor)
