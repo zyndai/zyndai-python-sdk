@@ -1,7 +1,7 @@
 [project]
 name = "zyndai-agent"
-version = "0.1.1"
-description = "A Langchain and Autogen wrapper that enables agents to communicate and establish identity on the P3 AI Network. This SDK provides three core capabilities: Identity Management, Agent Discovery & Search, and MQTT-based Communication."
+version = "0.1.2"
+description = "A Langchain and Autogen wrapper that enables agents to communicate and establish identity on the Zynd AI Network. This SDK provides three core capabilities: Identity Management, Agent Discovery & Search, and MQTT-based Communication."
 authors = [
     { name = "Swapnil Shinde", email = "swapnilshinde9382@gmail.com" }
 ]
