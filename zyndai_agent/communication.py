@@ -5,9 +5,9 @@ import logging
 import uuid
 import paho.mqtt.client as mqtt
 
-from p3ai_agent.utils import encrypt_message, decrypt_message
+from zyndai_agent.utils import encrypt_message, decrypt_message
 from typing import List, Callable, Optional, Dict, Any
-from p3ai_agent.search import AgentSearchResponse
+from zyndai_agent.search import AgentSearchResponse
 
 # Configure logging with a more descriptive format
 logging.basicConfig(
