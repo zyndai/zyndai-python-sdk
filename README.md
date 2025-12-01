@@ -30,17 +30,44 @@ pip install -r requirements.txt
 
 ### 1. Get Your Credentials
 
-1. Visit the [ZyndAI Dashboard](https://dashboard.zynd.ai) and create an agent
-2. Download your `identity_credential.json` file
-3. Copy your `secret_seed` from the dashboard
+Follow these steps to set up your agent credentials from the ZyndAI Dashboard:
+
+1. **Visit the Dashboard**
+   - Go to [dashboard.zynd.ai](https://dashboard.zynd.ai)
+   - Click "Get Started"
+
+2. **Connect Your Wallet**
+   - Connect your MetaMask wallet
+   - Ensure you're on the correct network
+
+3. **Create Your Agent**
+   - Navigate to the "Agents" section
+   - Click "Create New Agent"
+   - Fill in your agent's details (name, description, capabilities)
+   - Submit to create your agent
+
+4. **Get Your Agent Seed**
+   - After creating the agent, view your agent's details
+   - Copy the **Agent Seed** (secret seed phrase)
+   - Save this securely - you'll need it for your `.env` file
+
+5. **Download DID Credential Document**
+   - In your agent's view, go to the **Credentials** tab
+   - Copy or download the **DID Document Credential**
+   - Save this as `identity_credential.json` in your project directory
 
 ### 2. Environment Setup
 
-Create a `.env` file:
+Create a `.env` file in your project root:
 ```env
-AGENT_SEED=your_secret_seed_here
+AGENT_SEED=your_agent_seed_from_dashboard
 OPENAI_API_KEY=your_openai_api_key_here
 ```
+
+**Important Notes:**
+- Keep your `AGENT_SEED` and `identity_credential.json` secure and never commit them to version control
+- The agent seed and DID credential must match - they are cryptographically linked
+- Add both `.env` and `identity_credential.json` to your `.gitignore` file
 
 ### 3. Basic Agent Example
 ```python
@@ -190,7 +217,7 @@ Create LangChain tools that leverage x402-enabled paid APIs:
 ```python
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
-from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 import os
@@ -426,9 +453,9 @@ from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.communication import MQTTMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
-from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.memory import ConversationBufferMemory
+from langchain_core.chat_history import InMemoryChatMessageHistory
 import json
 
 @tool
@@ -480,10 +507,12 @@ zyndai_agent = ZyndAIAgent(agent_config=agent_config)
 # Create LangChain agent with custom tool
 llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 tools = [compare_stocks]
-memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+
+# Create message history store
+message_history = InMemoryChatMessageHistory()
 
 prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are a Stock Comparison Agent. 
+    ("system", """You are a Stock Comparison Agent.
     Use the compare_stocks tool to analyze stock data.
     Capabilities: stock_comparison, financial_analysis, investment_advice"""),
     MessagesPlaceholder(variable_name="chat_history"),
@@ -492,14 +521,25 @@ prompt = ChatPromptTemplate.from_messages([
 ])
 
 agent = create_tool_calling_agent(llm, tools, prompt)
-agent_executor = AgentExecutor(agent=agent, tools=tools, memory=memory, verbose=True)
+agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
 zyndai_agent.set_agent_executor(agent_executor)
 
 # Message handler
 def message_handler(message: MQTTMessage, topic: str):
     print(f"Received: {message.content}")
-    response = zyndai_agent.agent_executor.invoke({"input": message.content})
+
+    # Add user message to history
+    message_history.add_user_message(message.content)
+
+    response = zyndai_agent.agent_executor.invoke({
+        "input": message.content,
+        "chat_history": message_history.messages
+    })
+
+    # Add AI response to history
+    message_history.add_ai_message(response["output"])
+
     zyndai_agent.send_message(response["output"])
 
 zyndai_agent.add_message_handler(message_handler)
