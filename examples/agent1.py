@@ -1,9 +1,10 @@
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.communication import MQTTMessage
 from langchain_openai import ChatOpenAI
-from langchain.memory import ConversationBufferMemory
-from langchain.agents import initialize_agent, AgentType
-from langchain.tools.tavily_search import TavilySearchResults
+from langchain_classic.memory import ChatMessageHistory
+from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_community.tools.tavily_search import TavilySearchResults
 
 from dotenv import load_dotenv
 import os
@@ -47,28 +48,42 @@ if __name__ == "__main__":
 
     # Init p3 agent sdk wrapper
     p3_agent = ZyndAIAgent(agent_config=agent_config)
-    
+
     # Created a langchain agent
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
     search_tool = TavilySearchResults(max_results=3)
-    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-    system_prompt = """You are a helpful AI agent. Use search when the user asks anything about current events, facts, or the web."""
-    agent_executor = initialize_agent(
-        tools=[search_tool],
-        llm=llm,
-        agent=AgentType.OPENAI_FUNCTIONS,  # Supports tool calling
-        memory=memory,
-        verbose=True,
-        handle_parsing_errors=True,
-        agent_kwargs={"system_message": system_prompt}
-    )
+
+    # Create message history store
+    message_history = ChatMessageHistory()
+
+    # Create prompt template
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are a helpful AI agent. Use search when the user asks anything about current events, facts, or the web."),
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("human", "{input}"),
+        MessagesPlaceholder(variable_name="agent_scratchpad")
+    ])
+
+    # Create agent with tool calling
+    agent = create_tool_calling_agent(llm, [search_tool], prompt)
+    agent_executor = AgentExecutor(agent=agent, tools=[search_tool], verbose=True)
 
     p3_agent.set_agent_executor(agent_executor)
 
 
     def message_handler(message: MQTTMessage, topic: str):
-        agent_response = p3_agent.agent_executor.invoke({"input": message.content})
+        # Add user message to history
+        message_history.add_user_message(message.content)
+
+        agent_response = p3_agent.agent_executor.invoke({
+            "input": message.content,
+            "chat_history": message_history.messages
+        })
         agent_output = agent_response["output"]
+
+        # Add AI response to history
+        message_history.add_ai_message(agent_output)
+
         p3_agent.send_message(agent_output)
 
     p3_agent.add_message_handler(message_handler)

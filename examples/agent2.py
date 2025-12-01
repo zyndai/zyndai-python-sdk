@@ -1,8 +1,5 @@
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from langchain_openai import ChatOpenAI
-from langchain.memory import ConversationBufferMemory
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.agents import AgentExecutor, create_openai_functions_agent
 from dotenv import load_dotenv
 import os
 from time import sleep
@@ -45,12 +42,11 @@ if __name__ == "__main__":
 
     # Init p3 agent sdk wrapper
     p3_agent = ZyndAIAgent(agent_config=agent_config)
-    
-    # Created a langchain agent
-    agent_executor = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
-    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
-    p3_agent.set_agent_executor(agent_executor)
+    # Created a langchain LLM (not using memory in this simple example)
+    llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+
+    p3_agent.set_agent_executor(llm)
 
 
     while True:

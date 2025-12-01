@@ -1,11 +1,8 @@
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.communication import MQTTMessage
-from langchain_openai import ChatOpenAI
-from langchain.memory import ConversationBufferMemory
 from dotenv import load_dotenv
 import os
 from time import sleep
-import json
 import re
 
 load_dotenv()

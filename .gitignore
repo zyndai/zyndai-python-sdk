@@ -5,3 +5,4 @@
 dist
 
 zyndai_agent.egg-info
+__pycache__

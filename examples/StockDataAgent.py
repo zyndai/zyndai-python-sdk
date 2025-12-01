@@ -1,10 +1,10 @@
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.communication import MQTTMessage
 from langchain_openai import ChatOpenAI
-from langchain.memory import ConversationBufferMemory
+from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
 
 from dotenv import load_dotenv
 import os
@@ -60,37 +60,50 @@ if __name__ == "__main__":
 
     # Init p3 agent sdk wrapper
     p3_agent = ZyndAIAgent(agent_config=agent_config)
-    
+
     # Create a langchain agent with stock price tool
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
     tools = [get_stock_price]
-    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-    
+
+    # Create message history store
+    message_history = InMemoryChatMessageHistory()
+
     prompt = ChatPromptTemplate.from_messages([
         ("system", """You are a Stock Data Agent. Your job is to fetch stock price information for requested stocks.
-        
+
         When a user asks for stock information, use the get_stock_price tool to fetch the data.
         If multiple stocks are requested, fetch data for each one.
-        
+
         Always return the data in a clear, structured format that can be easily parsed by other agents.
         Include the stock symbol, current price, change percentage, volume, and market cap.
-        
+
         Capabilities: stock_data_retrieval, financial_data, market_information"""),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
         MessagesPlaceholder(variable_name="agent_scratchpad")
     ])
-    
+
     # Use create_tool_calling_agent instead of create_openai_functions_agent
     agent = create_tool_calling_agent(llm, tools, prompt)
-    agent_executor = AgentExecutor(agent=agent, tools=tools, memory=memory, verbose=True)
+    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
     p3_agent.set_agent_executor(agent_executor)
 
     def message_handler(message: MQTTMessage, topic: str):
         print(f"Received message: {message.content}")
-        agent_response = p3_agent.agent_executor.invoke({"input": message.content})
+
+        # Add user message to history
+        message_history.add_user_message(message.content)
+
+        agent_response = p3_agent.agent_executor.invoke({
+            "input": message.content,
+            "chat_history": message_history.messages
+        })
         agent_output = agent_response["output"]
+
+        # Add AI response to history
+        message_history.add_ai_message(agent_output)
+
         print(f"Sending response: {agent_output}")
         p3_agent.send_message(agent_output)
 
