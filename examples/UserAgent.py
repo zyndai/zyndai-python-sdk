@@ -8,8 +8,8 @@ import re
 load_dotenv()
 
 class StockComparisonOrchestrator:
-    def __init__(self, p3_agent):
-        self.p3_agent = p3_agent
+    def __init__(self, zynd_agent):
+        self.zynd_agent = zynd_agent
         self.stock_data_agent = None
         self.comparison_agent = None
         self.received_messages = []
@@ -23,7 +23,7 @@ class StockComparisonOrchestrator:
         print("Searching for stock data agent...")
         
         # Search for stock data agent
-        stock_data_agents = self.p3_agent.search_agents_by_capabilities(["stock_data_retrieval"])
+        stock_data_agents = self.zynd_agent.search_agents_by_capabilities(["stock_data_retrieval"])
         if stock_data_agents:
             print("Stock Data Agents Found:")
             for agent in stock_data_agents:
@@ -55,7 +55,7 @@ class StockComparisonOrchestrator:
         
         # Search for comparison agent
         print("Searching for stock comparison agent...")
-        comparison_agents = self.p3_agent.search_agents_by_capabilities(["stock_comparison"])
+        comparison_agents = self.zynd_agent.search_agents_by_capabilities(["stock_comparison"])
         if comparison_agents:
             print("Stock Comparison Agents Found:")
             for agent in comparison_agents:
@@ -90,12 +90,12 @@ class StockComparisonOrchestrator:
     def connect_to_agent(self, agent):
         """Connect to a specific agent"""
         print(f"Connecting to agent: {agent['didIdentifier']}")
-        self.p3_agent.connect_agent(agent)
+        self.zynd_agent.connect_agent(agent)
     
     def disconnect_current_agent(self):
         """Disconnect from current agent"""
         print("Disconnecting from current agent...")
-        # Note: Add actual disconnect method if available in P3 AI SDK
+        # Note: Add actual disconnect method if available in Zynd AI SDK
         # For now, we'll just reset the connection state
         pass
     
@@ -162,7 +162,7 @@ class StockComparisonOrchestrator:
         for symbol in self.stock_symbols:
             message = f"Get stock price data for {symbol}"
             print(f"Requesting stock data: {message}")
-            self.p3_agent.send_message(message)
+            self.zynd_agent.send_message(message)
             
             # Wait for response for this stock
             max_wait = 15  # seconds per stock
@@ -193,7 +193,7 @@ class StockComparisonOrchestrator:
         
         comparison_message = f"Compare these stocks:\n{combined_data}"
         print(f"Sending to comparison agent: {comparison_message}")
-        self.p3_agent.send_message(comparison_message)
+        self.zynd_agent.send_message(comparison_message)
         
         # Wait for comparison response
         max_wait = 15  # seconds
@@ -236,14 +236,14 @@ if __name__ == "__main__":
         secret_seed=os.environ["AGENT2_SEED"]
     )
 
-    # Init p3 agent sdk wrapper
-    p3_agent = ZyndAIAgent(agent_config=agent_config)
-    
+    # Init zynd agent sdk wrapper
+    zynd_agent = ZyndAIAgent(agent_config=agent_config)
+
     # Create orchestrator
-    orchestrator = StockComparisonOrchestrator(p3_agent)
-    
+    orchestrator = StockComparisonOrchestrator(zynd_agent)
+
     # Set up message handler
-    p3_agent.add_message_handler(orchestrator.handle_message)
+    zynd_agent.add_message_handler(orchestrator.handle_message)
     
     print("User Orchestrator Agent is running...")
     print("This agent orchestrates stock comparison requests.")

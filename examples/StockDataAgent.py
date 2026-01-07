@@ -58,8 +58,8 @@ if __name__ == "__main__":
         secret_seed=os.environ["STOCK_DATA_AGENT_SEED"]
     )
 
-    # Init p3 agent sdk wrapper
-    p3_agent = ZyndAIAgent(agent_config=agent_config)
+    # Init zynd agent sdk wrapper
+    zynd_agent = ZyndAIAgent(agent_config=agent_config)
 
     # Create a langchain agent with stock price tool
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
@@ -87,7 +87,7 @@ if __name__ == "__main__":
     agent = create_tool_calling_agent(llm, tools, prompt)
     agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
-    p3_agent.set_agent_executor(agent_executor)
+    zynd_agent.set_agent_executor(agent_executor)
 
     def message_handler(message: MQTTMessage, topic: str):
         print(f"Received message: {message.content}")
@@ -95,7 +95,7 @@ if __name__ == "__main__":
         # Add user message to history
         message_history.add_user_message(message.content)
 
-        agent_response = p3_agent.agent_executor.invoke({
+        agent_response = zynd_agent.agent_executor.invoke({
             "input": message.content,
             "chat_history": message_history.messages
         })
@@ -105,9 +105,9 @@ if __name__ == "__main__":
         message_history.add_ai_message(agent_output)
 
         print(f"Sending response: {agent_output}")
-        p3_agent.send_message(agent_output)
+        zynd_agent.send_message(agent_output)
 
-    p3_agent.add_message_handler(message_handler)
+    zynd_agent.add_message_handler(message_handler)
 
     print("Stock Data Agent is running...")
     print("This agent can fetch stock price data for any stock symbol.")

@@ -21,13 +21,13 @@ if __name__ == "__main__":
     message_history:
         store <limit> number of past messages for better context
     registry_url:
-        P3 AI agent registry url
+        Zynd AI agent registry url
     mqtt_broker_url:
         default mqtt broker url on which you will be listening on
     identity_credential_path:
-        file path of credential document of the agent downloaded from the P3 AI dashboard 
+        file path of credential document of the agent downloaded from the Zynd AI dashboard
     secret_seed:
-        Seed string of agent downloaded from the P3 AI dashboard
+        Seed string of agent downloaded from the Zynd AI dashboard
     """
     agent_config = AgentConfig(
         default_outbox_topic=None,
@@ -40,18 +40,18 @@ if __name__ == "__main__":
     )
 
 
-    # Init p3 agent sdk wrapper
-    p3_agent = ZyndAIAgent(agent_config=agent_config)
+    # Init zynd agent sdk wrapper
+    zynd_agent = ZyndAIAgent(agent_config=agent_config)
 
     # Created a langchain LLM (not using memory in this simple example)
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 
-    p3_agent.set_agent_executor(llm)
+    zynd_agent.set_agent_executor(llm)
 
 
     while True:
         search_filter = input("Search Agent: ")
-        agents = p3_agent.search_agents_by_capabilities([search_filter])
+        agents = zynd_agent.search_agents_by_capabilities([search_filter])
 
         print("Agents Found")
         for agent in agents:
@@ -61,18 +61,18 @@ if __name__ == "__main__":
                 Match Score: {agent["matchScore"]}
             """)
             print("================")
-        
+
         agent_select = input("Connect to agent DID: ")
 
         selected_agent = None
         for agent in agents:
             if agent["didIdentifier"] == agent_select:
                 selected_agent = agent
-        
+
         if not selected_agent:
             raise "Invalid did agent not found"
-        
-        p3_agent.connect_agent(selected_agent)
+
+        zynd_agent.connect_agent(selected_agent)
 
         print("Connected to agent")
 
@@ -81,5 +81,5 @@ if __name__ == "__main__":
 
             if message == "Exit":
                 break
-            
-            p3_agent.send_message(message)
+
+            zynd_agent.send_message(message)

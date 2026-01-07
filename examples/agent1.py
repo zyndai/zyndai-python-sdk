@@ -27,13 +27,13 @@ if __name__ == "__main__":
     message_history:
         store <limit> number of past messages for better context
     registry_url:
-        P3 AI agent registry url
+        Zynd AI agent registry url
     mqtt_broker_url:
         default mqtt broker url on which you will be listening on
     identity_credential_path:
-        file path of credential document of the agent downloaded from the P3 AI dashboard 
+        file path of credential document of the agent downloaded from the Zynd AI dashboard
     secret_seed:
-        Seed string of agent downloaded from the P3 AI dashboard
+        Seed string of agent downloaded from the Zynd AI dashboard
     """
     agent_config = AgentConfig(
         default_outbox_topic=None,
@@ -46,8 +46,8 @@ if __name__ == "__main__":
     )
 
 
-    # Init p3 agent sdk wrapper
-    p3_agent = ZyndAIAgent(agent_config=agent_config)
+    # Init zynd agent sdk wrapper
+    zynd_agent = ZyndAIAgent(agent_config=agent_config)
 
     # Created a langchain agent
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
@@ -68,14 +68,14 @@ if __name__ == "__main__":
     agent = create_tool_calling_agent(llm, [search_tool], prompt)
     agent_executor = AgentExecutor(agent=agent, tools=[search_tool], verbose=True)
 
-    p3_agent.set_agent_executor(agent_executor)
+    zynd_agent.set_agent_executor(agent_executor)
 
 
     def message_handler(message: MQTTMessage, topic: str):
         # Add user message to history
         message_history.add_user_message(message.content)
 
-        agent_response = p3_agent.agent_executor.invoke({
+        agent_response = zynd_agent.agent_executor.invoke({
             "input": message.content,
             "chat_history": message_history.messages
         })
@@ -84,9 +84,9 @@ if __name__ == "__main__":
         # Add AI response to history
         message_history.add_ai_message(agent_output)
 
-        p3_agent.send_message(agent_output)
+        zynd_agent.send_message(agent_output)
 
-    p3_agent.add_message_handler(message_handler)
+    zynd_agent.add_message_handler(message_handler)
 
 
     # Main loop
@@ -95,6 +95,6 @@ if __name__ == "__main__":
 
         if message == "Exit":
             break
-        
-        p3_agent.send_message(message)
+
+        zynd_agent.send_message(message)
     
