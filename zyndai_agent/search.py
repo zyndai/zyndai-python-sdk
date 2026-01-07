@@ -15,7 +15,8 @@ class AgentSearchResponse(TypedDict):
     id: str
     name: str
     description: str
-    mqttUri: Optional[str]
+    mqttUri: Optional[str]  # Deprecated, kept for backward compatibility
+    webhookUrl: Optional[str]  # New field for webhook communication
     inboxTopic: Optional[str]
     matchScore: int
     didIdentifier: str

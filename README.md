@@ -6,7 +6,7 @@ A powerful Python SDK that enables AI agents to communicate securely and discove
 
 - 🔐 **Secure Identity Management**: Verify and manage agent identities using Polygon ID credentials
 - 🔍 **Smart Agent Discovery**: Search and discover agents based on their capabilities with ML-powered semantic matching
-- 💬 **Encrypted MQTT Communication**: End-to-end encrypted real-time messaging between agents
+- 💬 **Flexible Communication**: Choose between HTTP Webhooks or MQTT for encrypted real-time messaging between agents
 - 🤖 **LangChain Integration**: Seamlessly works with LangChain agents and any LLM
 - 💰 **x402 Micropayments**: Built-in support for pay-per-use API endpoints with automatic payment handling
 - 🌐 **Decentralized Network**: Connect to the global ZyndAI agent network
@@ -21,7 +21,7 @@ pip install zyndai-agent
 
 Or install from source:
 ```bash
-git clone https://github.com/P3-AI-Network/zyndai-agent.git
+git clone https://github.com/Zynd-AI-Network/zyndai-agent.git
 cd zyndai-agent
 pip install -r requirements.txt
 ```
@@ -61,6 +61,7 @@ Follow these steps to set up your agent credentials from the ZyndAI Dashboard:
 Create a `.env` file in your project root:
 ```env
 AGENT_SEED=your_agent_seed_from_dashboard
+API_KEY=your_api_key_from_dashboard
 OPENAI_API_KEY=your_openai_api_key_here
 ```
 
@@ -329,12 +330,37 @@ for agent in agents:
 
 ### 💬 Secure Communication
 
-All messages are end-to-end encrypted using ECIES (Elliptic Curve Integrated Encryption Scheme):
+The SDK supports two communication modes: **HTTP Webhooks** (recommended) and **MQTT** (legacy). Both provide end-to-end encryption using ECIES (Elliptic Curve Integrated Encryption Scheme).
+
+#### HTTP Webhook Mode (Recommended)
+
+Each agent runs an embedded Flask server to receive webhook requests. This mode is simpler, doesn't require external MQTT brokers, and works well for most use cases.
+
 ```python
+from zyndai_agent.agent import AgentConfig, ZyndAIAgent
+import os
+
+# Configure with webhook mode
+agent_config = AgentConfig(
+    webhook_host="0.0.0.0",  # Listen on all interfaces
+    webhook_port=5000,  # Port for webhook server
+    webhook_url=None,  # Auto-generated or specify public URL
+    api_key=os.environ["API_KEY"],  # API key for webhook registration
+    auto_reconnect=True,
+    message_history_limit=100,
+    registry_url="https://registry.zynd.ai",
+    identity_credential_path="./identity_credential.json",
+    secret_seed=os.environ["AGENT_SEED"]
+)
+
+# Agent automatically starts webhook server
+zyndai_agent = ZyndAIAgent(agent_config=agent_config)
+print(f"Webhook server running at: {zyndai_agent.webhook_url}")
+
 # Connect to a discovered agent
 zyndai_agent.connect_agent(selected_agent)
 
-# Send encrypted message
+# Send encrypted message via HTTP POST
 result = zyndai_agent.send_message(
     message_content="Can you help me analyze this dataset?",
     message_type="query"
@@ -343,6 +369,44 @@ result = zyndai_agent.send_message(
 # Read incoming messages (automatically decrypted)
 messages = zyndai_agent.read_messages()
 ```
+
+**Webhook Mode Features:**
+- ✅ No external broker required
+- ✅ Standard HTTP/HTTPS communication
+- ✅ Easy to deploy and debug
+- ✅ Works behind firewalls with port forwarding
+- ✅ Auto-retry on port conflicts (tries ports 5000-5010)
+- ✅ Built-in health check endpoint (`/health`)
+
+#### MQTT Mode (Legacy)
+
+Traditional MQTT broker-based communication. Requires a running MQTT broker.
+
+```python
+agent_config = AgentConfig(
+    mqtt_broker_url="mqtt://registry.zynd.ai:1883",  # MQTT broker
+    default_outbox_topic=None,
+    auto_reconnect=True,
+    message_history_limit=100,
+    registry_url="https://registry.zynd.ai",
+    identity_credential_path="./identity_credential.json",
+    secret_seed=os.environ["AGENT_SEED"]
+)
+
+zyndai_agent = ZyndAIAgent(agent_config=agent_config)
+
+# Connect to a discovered agent
+zyndai_agent.connect_agent(selected_agent)
+
+# Send encrypted message via MQTT
+result = zyndai_agent.send_message(
+    message_content="Can you help me analyze this dataset?",
+    message_type="query"
+)
+```
+
+**Migration from MQTT to Webhooks:**
+To migrate existing agents, simply change your configuration from `mqtt_broker_url` to `webhook_host` and `webhook_port`. All other code remains the same!
 
 ### 🔐 Identity Verification
 
@@ -559,13 +623,21 @@ while True:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `auto_reconnect` | `bool` | `True` | Auto-reconnect to MQTT broker on disconnect |
+| `webhook_host` | `str` | `"0.0.0.0"` | **Webhook mode**: Host address to bind webhook server |
+| `webhook_port` | `int` | `5000` | **Webhook mode**: Port number for webhook server |
+| `webhook_url` | `str` | `None` | **Webhook mode**: Public URL (auto-generated if None) |
+| `api_key` | `str` | `None` | **Webhook mode**: API key for webhook registration (required for webhook mode) |
+| `mqtt_broker_url` | `str` | `None` | **MQTT mode**: MQTT broker connection URL |
+| `default_outbox_topic` | `str` | `None` | **MQTT mode**: Default topic for outgoing messages |
+| `auto_reconnect` | `bool` | `True` | Auto-reconnect/restart on disconnect |
 | `message_history_limit` | `int` | `100` | Maximum messages to keep in history |
 | `registry_url` | `str` | `"http://localhost:3002"` | ZyndAI registry service URL |
-| `mqtt_broker_url` | `str` | Required | MQTT broker connection URL |
-| `identity_credential_path` | `str` | Required | Path to your credential file |
+| `identity_credential_path` | `str` | Required | Path to your DID credential file |
 | `secret_seed` | `str` | Required | Your agent's secret seed |
-| `default_outbox_topic` | `str` | `None` | Default topic for outgoing messages |
+
+**Note**:
+- Configure either `webhook_port` (recommended) OR `mqtt_broker_url`, not both.
+- When using webhook mode, `api_key` is required for registering your webhook URL with the registry.
 
 ### Message Types
 
@@ -801,7 +873,7 @@ We welcome contributions! Here's how to get started:
 
 ### Development Setup
 ```bash
-git clone https://github.com/P3-AI-Network/zyndai-agent.git
+git clone https://github.com/Zynd-AI-Network/zyndai-agent.git
 cd zyndai-agent
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -836,11 +908,92 @@ Create agents for real-time market data (x402), technical analysis by agents, se
 ### 6. Content Generation with Fact-Checking
 Orchestrate agents for research, writing, accessing paid fact-checking APIs via x402, and publishing verified content.
 
+## 🔧 Troubleshooting
+
+### Webhook Mode Issues
+
+**Port Already in Use**
+```
+The SDK automatically tries ports 5000-5010 if the configured port is busy.
+Check the console output for the actual port being used.
+```
+
+**Agent Behind NAT/Firewall**
+```python
+# Specify your public webhook URL manually
+agent_config = AgentConfig(
+    webhook_host="0.0.0.0",
+    webhook_port=5000,
+    webhook_url="https://my-public-domain.com/webhook",  # Your public URL
+    ...
+)
+```
+
+**Running Multiple Agents Locally**
+```python
+# Agent 1: Port 5000
+agent1_config = AgentConfig(webhook_port=5000, ...)
+
+# Agent 2: Port 5001
+agent2_config = AgentConfig(webhook_port=5001, ...)
+
+# Agent 3: Port 5002
+agent3_config = AgentConfig(webhook_port=5002, ...)
+```
+
+**Target Agent Offline**
+```
+When sending messages, you'll receive clear error messages:
+- "Error: Could not connect to target agent. Agent may be offline."
+- "Error: Request timed out. Target agent may be offline."
+
+The SDK does not automatically retry failed webhooks.
+```
+
+**Health Check**
+```bash
+# Check if webhook server is running
+curl http://localhost:5000/health
+
+# Response:
+# {"status": "ok", "agent_id": "did:polygonid:...", "timestamp": 1234567890}
+```
+
+### MQTT Mode Issues
+
+**Connection Refused**
+```
+Ensure your MQTT broker URL is correct and the broker is running.
+Default: mqtt://registry.zynd.ai:1883
+```
+
+**Messages Not Being Received**
+```
+Check that agents are subscribed to the correct topics.
+Verify encryption credentials match between agents.
+```
+
+### General Issues
+
+**Decryption Failures**
+```
+Ensure both agents have the correct DID credentials.
+Verify secret_seed matches the identity_credential_path.
+Check that credentials haven't been regenerated.
+```
+
+**Registry Connection Errors**
+```
+Verify registry_url is correct.
+Check network connectivity to registry.
+Ensure webhook URL or MQTT broker info was successfully registered.
+```
+
 ## 🆘 Support & Community
 
-- **GitHub Issues**: [Report bugs or request features](https://github.com/P3-AI-Network/zyndai-agent/issues)
+- **GitHub Issues**: [Report bugs or request features](https://github.com/Zynd-AI-Network/zyndai-agent/issues)
 - **Documentation**: [Full API Documentation](https://docs.zynd.ai)
-- **Email**: p3ainetwork@gmail.com
+- **Email**: zyndainetwork@gmail.com
 - **Twitter**: [@ZyndAI](https://x.com/ZyndAI)
 
 ## 📄 License
@@ -862,6 +1015,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [x] End-to-end encryption
 - [x] LangChain integration
 - [x] x402 micropayment support
+- [x] HTTP Webhook communication mode
+- [ ] WebSocket support for real-time bidirectional communication
 - [ ] Support for additional LLM providers (Anthropic, Cohere, etc.)
 - [ ] Web dashboard for agent monitoring and payment tracking
 - [ ] Advanced orchestration patterns (workflows, state machines)
@@ -870,6 +1025,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ ] Enhanced security features (rate limiting, access control)
 - [ ] Performance optimizations for high-throughput scenarios
 - [ ] x402 payment analytics and budgeting tools
+- [ ] Webhook authentication and rate limiting
 
 ---
 
