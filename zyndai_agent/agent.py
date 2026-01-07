@@ -29,8 +29,12 @@ class AgentConfig(BaseModel):
     identity_credential_path: str
     identity_credential: Optional[dict] = None
     secret_seed: str = None
+    agent_id: str = None
 
-class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcessor):
+    price: Optional[str] = None
+    pay_to_address: Optional[str] = None
+
+class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcessor, WebhookCommunicationManager):
 
     def __init__(self, agent_config: AgentConfig):
 
@@ -66,7 +70,8 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
                 auto_restart=agent_config.auto_reconnect,
                 message_history_limit=agent_config.message_history_limit,
                 identity_credential=self.identity_credential,
-                secret_seed=agent_config.secret_seed
+                price=agent_config.price,
+                pay_to_address=agent_config.pay_to_address
             )
             self.update_agent_webhook_info()
 
@@ -96,15 +101,15 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
 
     def update_agent_mqtt_info(self):
         """Updates the mqtt connection info of the agent into the registry so other agents can find me"""
-        print(self.agent_config.secret_seed, self.agent_config.mqtt_broker_url, f"{self.agent_config.registry_url}/agents/update-mqtt")
-        updateResponse = requests.post(
+
+        updateResponse = requests.patch(
             f"{self.agent_config.registry_url}/agents/update-mqtt",
             data={
                 "seed": self.agent_config.secret_seed,
                 "mqttUri": self.agent_config.mqtt_broker_url
             }
         )
-        print(updateResponse.status_code,"====")
+
         if (updateResponse.status_code != 201):
             raise Exception("Failed to update agent connection info in p3 registry.")
 
@@ -115,28 +120,26 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
         if not self.agent_config.api_key:
             raise ValueError("API key is required for webhook registration. Please provide api_key in AgentConfig.")
 
-        print(self.webhook_url, f"{self.agent_config.registry_url}/agents/update-webhook")
-
         # Prepare headers with API key
         headers = {
-            "api-key": self.agent_config.api_key,
+            "X-API-KEY": self.agent_config.api_key,
             "Content-Type": "application/json"
         }
 
         # Prepare request body
         payload = {
-            "agentId": self.identity_credential["issuer"],
+            "agentId": self.agent_config.agent_id,
             "httpWebhookUrl": self.webhook_url
         }
 
-        updateResponse = requests.post(
+        updateResponse = requests.patch(
             f"{self.agent_config.registry_url}/agents/update-webhook",
             json=payload,
             headers=headers
         )
-        print(updateResponse.status_code, "====")
+
         if updateResponse.status_code != 200:
-            raise Exception(f"Failed to update agent webhook info in p3 registry. Status: {updateResponse.status_code}, Response: {updateResponse.text}")
+            raise Exception(f"Failed to update agent webhook info in Zynd registry. Status: {updateResponse.status_code}, Response: {updateResponse.text}")
 
         print("Synced webhook URL with the registry...")
 

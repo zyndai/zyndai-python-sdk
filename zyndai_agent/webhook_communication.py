@@ -1,13 +1,12 @@
 import time
-import json
 import logging
 import threading
 import requests
 from flask import Flask, request, jsonify
 from typing import List, Callable, Optional, Dict, Any
 from zyndai_agent.message import AgentMessage
-from zyndai_agent.utils import encrypt_message, decrypt_message
 from zyndai_agent.search import AgentSearchResponse
+from x402.flask.middleware import PaymentMiddleware
 
 # Configure logging with a more descriptive format
 logging.basicConfig(
@@ -27,8 +26,6 @@ class WebhookCommunicationManager:
     """
 
     identity_credential: dict = None
-    identity_credential_connected_agent: dict = None
-    secret_seed = None
 
     def __init__(
         self,
@@ -39,7 +36,8 @@ class WebhookCommunicationManager:
         auto_restart: bool = True,
         message_history_limit: int = 100,
         identity_credential: dict = None,
-        secret_seed: str = None
+        price: Optional[str] = "$0.01",
+        pay_to_address: Optional[str] = None
     ):
         """
         Initialize the webhook agent communication manager.
@@ -52,7 +50,6 @@ class WebhookCommunicationManager:
             auto_restart: Whether to attempt restart on failure
             message_history_limit: Maximum number of messages to keep in history
             identity_credential: DID credential for this agent
-            secret_seed: Secret seed for encryption/decryption
         """
 
         self.agent_id = agent_id
@@ -63,7 +60,6 @@ class WebhookCommunicationManager:
         self.message_history_limit = message_history_limit
 
         self.identity_credential = identity_credential
-        self.secret_seed = secret_seed
 
         self.is_running = False
         self.is_agent_connected = False
@@ -71,6 +67,7 @@ class WebhookCommunicationManager:
         self.message_history = []
         self.message_handlers = []
         self.target_webhook_url = None
+        self.pending_responses = {}  # Store responses by message_id
 
         # Thread safety
         self._lock = threading.Lock()
@@ -78,6 +75,17 @@ class WebhookCommunicationManager:
         # Create Flask app
         self.flask_app = Flask(f"agent_{agent_id}")
         self.flask_app.logger.setLevel(logging.ERROR)  # Suppress Flask logging
+
+        if price != None and pay_to_address != None:
+            self.payment_middleware = PaymentMiddleware(self.flask_app)
+            self.payment_middleware.add(
+                price,
+                pay_to_address,
+                path="/webhook"
+            )
+        else:
+            print("Disabling x402, X402 payment config not provided")
+
         self._setup_routes()
 
         # Start webhook server
@@ -91,7 +99,11 @@ class WebhookCommunicationManager:
 
         @self.flask_app.route('/webhook', methods=['POST'])
         def webhook_handler():
-            return self._handle_webhook_request()
+            return self._handle_webhook_request(sync=False)
+
+        @self.flask_app.route('/webhook/sync', methods=['POST'])
+        def webhook_sync_handler():
+            return self._handle_webhook_request(sync=True)
 
         @self.flask_app.route('/health', methods=['GET'])
         def health_check():
@@ -101,7 +113,7 @@ class WebhookCommunicationManager:
                 "timestamp": time.time()
             }), 200
 
-    def _handle_webhook_request(self):
+    def _handle_webhook_request(self, sync=False):
         """Handle incoming webhook POST requests."""
         try:
             # Verify request is JSON
@@ -109,23 +121,15 @@ class WebhookCommunicationManager:
                 logger.error("Received non-JSON request")
                 return jsonify({"error": "Content-Type must be application/json"}), 400
 
-            encrypted_payload = request.get_json()
+            payload = request.get_json()
 
-            # Decrypt message
-            decrypted_payload = decrypt_message(
-                encrypted_payload,
-                self.secret_seed,
-                self.identity_credential
-            )
-
-            # Parse message
-            message = AgentMessage.from_json(decrypted_payload)
+            # Parse message from dict (request.get_json() returns a dict, not a string)
+            message = AgentMessage.from_dict(payload)
 
             logger.info(f"[{self.agent_id}] Received message from {message.sender_id}")
 
             # Auto-connect to sender if not connected
             if not self.is_agent_connected:
-                self.identity_credential_connected_agent = message.sender_did
                 self.is_agent_connected = True
 
             # Store in history
@@ -146,19 +150,52 @@ class WebhookCommunicationManager:
                 if len(self.message_history) > self.message_history_limit:
                     self.message_history = self.message_history[-self.message_history_limit:]
 
-            # Invoke message handlers
-            for handler in self.message_handlers:
-                try:
-                    handler(message, None)  # No topic in webhook context
-                except Exception as e:
-                    logger.error(f"Error in message handler: {e}")
+            # Check if synchronous response is requested
+            if sync:
+                # Wait for handler to process and store response
+                # Invoke message handlers synchronously
+                for handler in self.message_handlers:
+                    try:
+                        handler(message, None)  # No topic in webhook context
+                    except Exception as e:
+                        logger.error(f"Error in message handler: {e}")
 
-            # Return success
-            return jsonify({
-                "status": "received",
-                "message_id": message.message_id,
-                "timestamp": time.time()
-            }), 200
+                # Wait for response (with timeout)
+                timeout = 30  # 30 seconds
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    with self._lock:
+                        if message.message_id in self.pending_responses:
+                            response = self.pending_responses.pop(message.message_id)
+                            return jsonify({
+                                "status": "success",
+                                "message_id": message.message_id,
+                                "response": response,
+                                "timestamp": time.time()
+                            }), 200
+                    time.sleep(0.1)  # Small delay to avoid busy waiting
+
+                # Timeout - no response received
+                return jsonify({
+                    "status": "timeout",
+                    "message_id": message.message_id,
+                    "error": "Agent did not respond within timeout period",
+                    "timestamp": time.time()
+                }), 408
+            else:
+                # Async mode - invoke handlers and return immediately
+                for handler in self.message_handlers:
+                    try:
+                        handler(message, None)  # No topic in webhook context
+                    except Exception as e:
+                        logger.error(f"Error in message handler: {e}")
+
+                # Return success
+                return jsonify({
+                    "status": "received",
+                    "message_id": message.message_id,
+                    "timestamp": time.time()
+                }), 200
 
         except Exception as e:
             logger.error(f"Error handling webhook request: {e}")
@@ -264,17 +301,13 @@ class WebhookCommunicationManager:
                 sender_did=self.identity_credential
             )
 
-            # Convert to JSON and encrypt
+            # Convert to JSON and send directly
             json_payload = message.to_json()
-            encrypted_message = encrypt_message(
-                json_payload,
-                self.identity_credential_connected_agent
-            )
 
-            # Send HTTP POST request
+            # Send HTTP POST request with plain JSON
             response = requests.post(
                 self.target_webhook_url,
-                json=encrypted_message,
+                json=json_payload,
                 headers={"Content-Type": "application/json"},
                 timeout=30  # 30 second timeout
             )
@@ -364,6 +397,18 @@ class WebhookCommunicationManager:
         """Alias for add_message_handler for backward compatibility."""
         self.add_message_handler(handler_fn)
 
+    def set_response(self, message_id: str, response: str):
+        """
+        Set a response for a specific message ID (for synchronous responses).
+
+        Args:
+            message_id: The ID of the message being responded to
+            response: The response content
+        """
+        with self._lock:
+            self.pending_responses[message_id] = response
+        logger.info(f"[{self.agent_id}] Set response for message {message_id}")
+
     def get_connection_status(self) -> Dict[str, Any]:
         """
         Get the current webhook server status and statistics.
@@ -410,13 +455,12 @@ class WebhookCommunicationManager:
         Connect to another agent using their webhook URL.
 
         Args:
-            agent: Agent search response containing webhookUrl and did
+            agent: Agent search response containing webhookUrl
         """
         if "webhookUrl" not in agent:
             raise ValueError("Agent does not have webhookUrl. Cannot connect via webhook.")
 
         self.target_webhook_url = agent["webhookUrl"]
-        self.identity_credential_connected_agent = json.loads(agent["did"])
         self.is_agent_connected = True
 
         logger.info(f"Connected to agent {agent['didIdentifier']} at {self.target_webhook_url}")

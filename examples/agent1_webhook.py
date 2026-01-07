@@ -38,13 +38,17 @@ if __name__ == "__main__":
     """
     agent_config = AgentConfig(
         webhook_host="0.0.0.0",
-        webhook_port=5000,  # Agent 1 uses port 5000
-        webhook_url=None,  # Will auto-generate http://localhost:5000/webhook
+        webhook_port=5001,  # Agent 1 uses port 5001
+        webhook_url=None,  # Will auto-generate http://localhost:5001/webhook
         auto_reconnect=True,
         message_history_limit=100,
         registry_url="https://registry.zynd.ai",
-        identity_credential_path="zynd-agent/examples/identity_credential1.json",
-        secret_seed=os.environ["AGENT1_SEED"]
+        identity_credential_path="examples/identity/identity_credential1.json",
+        secret_seed=os.environ["AGENT1_SEED"],
+        agent_id=os.environ["AGENT1_ID"],
+        price="$0.01",
+        pay_to_address="0xc5148b96d3F6T3234721C72EC8a57a4B07A45ca9",
+        api_key=os.environ["ZYND_API_KEY"]
     )
 
     # Init zynd agent sdk wrapper
@@ -85,7 +89,12 @@ if __name__ == "__main__":
         # Add AI response to history
         message_history.add_ai_message(agent_output)
 
-        zynd_agent.send_message(agent_output)
+        # Set the response for synchronous mode
+        zynd_agent.set_response(message.message_id, agent_output)
+
+        # Also send via webhook if target is connected (for agent-to-agent communication)
+        if zynd_agent.target_webhook_url:
+            zynd_agent.send_message(agent_output)
 
     zynd_agent.add_message_handler(message_handler)
 
