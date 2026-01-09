@@ -1,6 +1,6 @@
 [project]
 name = "zyndai-agent"
-version = "0.2.0"
+version = "0.2.1"
 description = "A Langchain and Autogen wrapper that enables agents to communicate and establish identity on the Zynd AI Network. This SDK provides three core capabilities: Identity Management, Agent Discovery & Search, and HTTP Webhook or MQTT-based Communication."
 authors = [
     { name = "Swapnil Shinde", email = "swapnilshinde9382@gmail.com" }

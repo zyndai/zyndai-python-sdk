@@ -7,8 +7,13 @@ A powerful Python SDK that enables AI agents to communicate securely and discove
 - 🔐 **Secure Identity Management**: Verify and manage agent identities using Polygon ID credentials
 - 🔍 **Smart Agent Discovery**: Search and discover agents based on their capabilities with ML-powered semantic matching
 - 💬 **Flexible Communication**: Choose between HTTP Webhooks or MQTT for encrypted real-time messaging between agents
+  - **Async/Sync Webhooks**: Support both fire-and-forget and request-response patterns
+  - **Built-in Endpoints**: `/webhook` (async) and `/webhook/sync` (sync with 30s timeout)
 - 🤖 **LangChain Integration**: Seamlessly works with LangChain agents and any LLM
 - 💰 **x402 Micropayments**: Built-in support for pay-per-use API endpoints with automatic payment handling
+  - **Webhook Protection**: Enable x402 payments on agent webhook endpoints
+  - **HTTP x402 Client**: Make payments to external x402-protected APIs
+  - **Automatic Challenge/Response**: Seamless payment flow with no manual intervention
 - 🌐 **Decentralized Network**: Connect to the global ZyndAI agent network
 - ⚡ **Easy Setup**: Get started in minutes with simple configuration
 
@@ -336,6 +341,8 @@ The SDK supports two communication modes: **HTTP Webhooks** (recommended) and **
 
 Each agent runs an embedded Flask server to receive webhook requests. This mode is simpler, doesn't require external MQTT brokers, and works well for most use cases.
 
+##### Basic Webhook Configuration
+
 ```python
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 import os
@@ -370,13 +377,177 @@ result = zyndai_agent.send_message(
 messages = zyndai_agent.read_messages()
 ```
 
+##### Webhook with x402 Micropayments
+
+Enable x402 payment protection on your webhook endpoints to monetize agent services:
+
+```python
+from zyndai_agent.agent import AgentConfig, ZyndAIAgent
+import os
+
+# Configure with webhook mode and x402 payments
+agent_config = AgentConfig(
+    webhook_host="0.0.0.0",
+    webhook_port=5001,
+    webhook_url=None,  # Auto-generated http://localhost:5001/webhook
+    auto_reconnect=True,
+    message_history_limit=100,
+    registry_url="https://registry.zynd.ai",
+    identity_credential_path="./identity_credential.json",
+    secret_seed=os.environ["AGENT_SEED"],
+    agent_id=os.environ["AGENT_ID"],
+    price="$0.01",  # Price per request
+    pay_to_address="0xYourEthereumAddress",  # Your payment address
+    api_key=os.environ["API_KEY"]
+)
+
+# Agent automatically starts webhook server with x402 payment middleware
+zyndai_agent = ZyndAIAgent(agent_config=agent_config)
+print(f"Webhook URL: {zyndai_agent.webhook_url}")
+print("x402 payments enabled - clients must pay to interact")
+```
+
+**x402 Configuration:**
+- `price`: Payment amount per request (e.g., "$0.01", "$0.10")
+- `pay_to_address`: Your Ethereum address to receive payments
+- If both `price` and `pay_to_address` are provided, x402 is automatically enabled
+- If either is `None`, x402 is disabled and endpoints are free to access
+
+##### Asynchronous vs Synchronous Webhooks
+
+The SDK supports two webhook communication modes:
+
+**1. Asynchronous Mode (Default)** - Fire and forget:
+```python
+# Messages sent to /webhook endpoint
+# Returns immediately without waiting for agent processing
+result = zyndai_agent.send_message("Process this data")
+
+# Handler processes asynchronously
+def message_handler(message: AgentMessage, topic: str):
+    # Process message
+    response = process_message(message.content)
+
+    # Optionally send response via separate webhook call
+    if zyndai_agent.target_webhook_url:
+        zyndai_agent.send_message(response)
+
+zyndai_agent.add_message_handler(message_handler)
+```
+
+**2. Synchronous Mode** - Request/response pattern:
+```python
+# Messages sent to /webhook/sync endpoint
+# Waits for agent to process and return response (30s timeout)
+
+# Handler sets response using set_response()
+def message_handler(message: AgentMessage, topic: str):
+    # Process message
+    response = agent_executor.invoke({"input": message.content})
+
+    # Set response for synchronous caller
+    zyndai_agent.set_response(message.message_id, response["output"])
+
+zyndai_agent.add_message_handler(message_handler)
+```
+
+**Synchronous Response Flow:**
+1. Client sends POST to `/webhook/sync`
+2. Agent processes message via handler
+3. Handler calls `set_response(message_id, response_content)`
+4. Client receives immediate HTTP response with result
+5. Timeout after 30 seconds if no response
+
+**Use Cases:**
+- **Async**: Long-running tasks, notifications, fire-and-forget operations
+- **Sync**: Real-time queries, immediate responses needed, request-reply pattern
+
+##### Complete Webhook Example with LangChain
+
+```python
+from zyndai_agent.agent import AgentConfig, ZyndAIAgent
+from zyndai_agent.message import AgentMessage
+from langchain_openai import ChatOpenAI
+from langchain_classic.memory import ChatMessageHistory
+from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_community.tools.tavily_search import TavilySearchResults
+import os
+
+# Configure agent with webhook and x402
+agent_config = AgentConfig(
+    webhook_host="0.0.0.0",
+    webhook_port=5001,
+    webhook_url=None,
+    auto_reconnect=True,
+    message_history_limit=100,
+    registry_url="https://registry.zynd.ai",
+    identity_credential_path="./identity_credential.json",
+    secret_seed=os.environ["AGENT_SEED"],
+    agent_id=os.environ["AGENT_ID"],
+    price="$0.01",  # Enable x402 payments
+    pay_to_address="0xYourAddress",
+    api_key=os.environ["API_KEY"]
+)
+
+# Initialize agent
+zynd_agent = ZyndAIAgent(agent_config=agent_config)
+
+# Create LangChain agent
+llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+search_tool = TavilySearchResults(max_results=3)
+message_history = ChatMessageHistory()
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful AI agent with web search capabilities."),
+    MessagesPlaceholder(variable_name="chat_history"),
+    ("human", "{input}"),
+    MessagesPlaceholder(variable_name="agent_scratchpad")
+])
+
+agent = create_tool_calling_agent(llm, [search_tool], prompt)
+agent_executor = AgentExecutor(agent=agent, tools=[search_tool], verbose=True)
+zynd_agent.set_agent_executor(agent_executor)
+
+# Message handler for both sync and async
+def message_handler(message: AgentMessage, topic: str):
+    # Add to history
+    message_history.add_user_message(message.content)
+
+    # Process with LangChain agent
+    agent_response = zynd_agent.agent_executor.invoke({
+        "input": message.content,
+        "chat_history": message_history.messages
+    })
+    agent_output = agent_response["output"]
+
+    message_history.add_ai_message(agent_output)
+
+    # Set response for synchronous mode
+    zynd_agent.set_response(message.message_id, agent_output)
+
+    # Also send via webhook for agent-to-agent communication
+    if zynd_agent.target_webhook_url:
+        zynd_agent.send_message(agent_output)
+
+zynd_agent.add_message_handler(message_handler)
+
+print(f"\nWebhook Agent Running!")
+print(f"Webhook URL: {zynd_agent.webhook_url}")
+print(f"x402 Payments: Enabled at {agent_config.price}")
+print("Supports both /webhook (async) and /webhook/sync (sync) endpoints")
+```
+
 **Webhook Mode Features:**
 - ✅ No external broker required
 - ✅ Standard HTTP/HTTPS communication
+- ✅ Synchronous and asynchronous message patterns
+- ✅ x402 micropayments integration
 - ✅ Easy to deploy and debug
 - ✅ Works behind firewalls with port forwarding
 - ✅ Auto-retry on port conflicts (tries ports 5000-5010)
 - ✅ Built-in health check endpoint (`/health`)
+- ✅ Automatic payment challenge/response handling
 
 #### MQTT Mode (Legacy)
 
@@ -407,6 +578,24 @@ result = zyndai_agent.send_message(
 
 **Migration from MQTT to Webhooks:**
 To migrate existing agents, simply change your configuration from `mqtt_broker_url` to `webhook_host` and `webhook_port`. All other code remains the same!
+
+#### Webhook Endpoints Summary
+
+When you start a webhook-enabled agent, the following HTTP endpoints become available:
+
+| Endpoint | Method | Description | Response Time |
+|----------|--------|-------------|---------------|
+| `/webhook` | POST | Asynchronous message reception | Immediate (fire-and-forget) |
+| `/webhook/sync` | POST | Synchronous message with response | Waits up to 30s for agent response |
+| `/health` | GET | Health check and status | Immediate |
+
+**Endpoint Behaviors:**
+- **`/webhook`** (Async): Accepts message, returns 200 immediately, processes in background
+- **`/webhook/sync`** (Sync): Accepts message, waits for handler to call `set_response()`, returns response or timeout
+- **`/health`**: Returns agent status, useful for monitoring and discovery
+
+**x402 Protection:**
+When `price` and `pay_to_address` are configured, all webhook endpoints require x402 payment before processing requests.
 
 ### 🔐 Identity Verification
 
@@ -627,6 +816,9 @@ while True:
 | `webhook_port` | `int` | `5000` | **Webhook mode**: Port number for webhook server |
 | `webhook_url` | `str` | `None` | **Webhook mode**: Public URL (auto-generated if None) |
 | `api_key` | `str` | `None` | **Webhook mode**: API key for webhook registration (required for webhook mode) |
+| `price` | `str` | `None` | **x402 Webhook**: Price per request (e.g., "$0.01"). Enables x402 if set with `pay_to_address` |
+| `pay_to_address` | `str` | `None` | **x402 Webhook**: Ethereum address for payments. Enables x402 if set with `price` |
+| `agent_id` | `str` | `None` | **x402 Webhook**: Agent identifier (required when using x402 payments) |
 | `mqtt_broker_url` | `str` | `None` | **MQTT mode**: MQTT broker connection URL |
 | `default_outbox_topic` | `str` | `None` | **MQTT mode**: Default topic for outgoing messages |
 | `auto_reconnect` | `bool` | `True` | Auto-reconnect/restart on disconnect |
@@ -635,9 +827,11 @@ while True:
 | `identity_credential_path` | `str` | Required | Path to your DID credential file |
 | `secret_seed` | `str` | Required | Your agent's secret seed |
 
-**Note**:
-- Configure either `webhook_port` (recommended) OR `mqtt_broker_url`, not both.
-- When using webhook mode, `api_key` is required for registering your webhook URL with the registry.
+**Notes**:
+- Configure either `webhook_port` (recommended) OR `mqtt_broker_url`, not both
+- When using webhook mode, `api_key` is required for registering your webhook URL with the registry
+- x402 payments require both `price` and `pay_to_address` to be set. If either is `None`, x402 is disabled
+- When using x402, `agent_id` should also be provided for proper identification
 
 ### Message Types
 
@@ -811,54 +1005,67 @@ except Exception as e:
 
 ## 📊 Architecture Overview
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   ZyndAI Agent SDK                       │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  ┌──────────────────┐  ┌──────────────────┐           │
-│  │ Identity Manager │  │  Search Manager  │           │
-│  │                  │  │                  │           │
-│  │ - Verify DIDs    │  │ - Capability     │           │
-│  │ - Load Creds     │  │   Matching       │           │
-│  │ - Manage Keys    │  │ - ML Scoring     │           │
-│  └──────────────────┘  └──────────────────┘           │
-│                                                          │
-│  ┌──────────────────────────────────────────┐          │
-│  │   Communication Manager (MQTT)            │          │
-│  │                                           │          │
-│  │  - End-to-End Encryption (ECIES)        │          │
-│  │  - Message Routing                       │          │
-│  │  - Topic Management                      │          │
-│  │  - History Tracking                      │          │
-│  └──────────────────────────────────────────┘          │
-│                                                          │
-│  ┌──────────────────────────────────────────┐          │
-│  │        x402 Payment Processor             │          │
-│  │                                           │          │
-│  │  - Payment Challenge Handling            │          │
-│  │  - Signature Generation                  │          │
-│  │  - Automatic Retry Logic                 │          │
-│  │  - Multi-Method Support (GET/POST/etc)   │          │
-│  └──────────────────────────────────────────┘          │
-│                                                          │
-│  ┌──────────────────────────────────────────┐          │
-│  │        LangChain Integration              │          │
-│  │                                           │          │
-│  │  - Agent Executor Support                │          │
-│  │  - Custom Tools                          │          │
-│  │  - Memory Management                     │          │
-│  └──────────────────────────────────────────┘          │
-└─────────────────────────────────────────────────────────┘
-            ▼                          ▼
-    ┌──────────────┐          ┌──────────────┐
-    │   Registry   │          │ MQTT Broker  │
-    │   Service    │          │              │
-    └──────────────┘          └──────────────┘
-            ▼
-    ┌──────────────┐
-    │ x402 Enabled │
-    │   Services   │
-    └──────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                   ZyndAI Agent SDK                           │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌──────────────────┐  ┌──────────────────┐               │
+│  │ Identity Manager │  │  Search Manager  │               │
+│  │                  │  │                  │               │
+│  │ - Verify DIDs    │  │ - Capability     │               │
+│  │ - Load Creds     │  │   Matching       │               │
+│  │ - Manage Keys    │  │ - ML Scoring     │               │
+│  └──────────────────┘  └──────────────────┘               │
+│                                                              │
+│  ┌──────────────────────────────────────────────┐          │
+│  │   Webhook Communication Manager               │          │
+│  │                                               │          │
+│  │  - Embedded Flask Server                     │          │
+│  │  - Async Endpoint (/webhook)                 │          │
+│  │  - Sync Endpoint (/webhook/sync)             │          │
+│  │  - Health Check (/health)                    │          │
+│  │  - x402 Payment Middleware (optional)        │          │
+│  │  - Message History Tracking                  │          │
+│  └──────────────────────────────────────────────┘          │
+│                                                              │
+│  ┌──────────────────────────────────────────┐              │
+│  │   Communication Manager (MQTT - Legacy)   │              │
+│  │                                           │              │
+│  │  - End-to-End Encryption (ECIES)        │              │
+│  │  - Message Routing                       │              │
+│  │  - Topic Management                      │              │
+│  │  - History Tracking                      │              │
+│  └──────────────────────────────────────────┘              │
+│                                                              │
+│  ┌──────────────────────────────────────────┐              │
+│  │        x402 Payment Processor             │              │
+│  │                                           │              │
+│  │  - Payment Challenge Handling            │              │
+│  │  - Signature Generation                  │              │
+│  │  - Automatic Retry Logic                 │              │
+│  │  - Multi-Method Support (GET/POST/etc)   │              │
+│  │  - Webhook Protection (via middleware)   │              │
+│  └──────────────────────────────────────────┘              │
+│                                                              │
+│  ┌──────────────────────────────────────────┐              │
+│  │        LangChain Integration              │              │
+│  │                                           │              │
+│  │  - Agent Executor Support                │              │
+│  │  - Custom Tools                          │              │
+│  │  - Memory Management                     │              │
+│  └──────────────────────────────────────────┘              │
+└─────────────────────────────────────────────────────────────┘
+       ▼                    ▼                   ▼
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│   Registry   │   │ MQTT Broker  │   │ Other Agent  │
+│   Service    │   │   (Legacy)   │   │  Webhooks    │
+└──────────────┘   └──────────────┘   └──────────────┘
+       ▼
+┌──────────────┐
+│ x402 Enabled │
+│   Services   │
+│  (HTTP APIs) │
+└──────────────┘
 ```
 
 ## 🤝 Contributing
@@ -959,6 +1166,35 @@ curl http://localhost:5000/health
 # {"status": "ok", "agent_id": "did:polygonid:...", "timestamp": 1234567890}
 ```
 
+**Testing Webhook Endpoints**
+```bash
+# Test async webhook (returns immediately)
+curl -X POST http://localhost:5000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Hello", "sender_id": "test", "message_type": "query"}'
+
+# Response: {"status": "received", "message_id": "...", "timestamp": 1234567890}
+
+# Test sync webhook (waits for agent response)
+curl -X POST http://localhost:5000/webhook/sync \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Hello", "sender_id": "test", "message_type": "query"}'
+
+# Response: {"status": "success", "message_id": "...", "response": "...", "timestamp": 1234567890}
+# Or timeout: {"status": "timeout", "message_id": "...", "error": "...", "timestamp": 1234567890}
+```
+
+**x402 Payment Testing**
+```bash
+# First request triggers 402 Payment Required
+curl -X POST http://localhost:5000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Hello"}'
+
+# Response: 402 with payment challenge
+# SDK automatically handles payment and retries
+```
+
 ### MQTT Mode Issues
 
 **Connection Refused**
@@ -1014,8 +1250,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [x] Core agent communication and discovery
 - [x] End-to-end encryption
 - [x] LangChain integration
-- [x] x402 micropayment support
-- [x] HTTP Webhook communication mode
+- [x] x402 micropayment support for HTTP APIs
+- [x] HTTP Webhook communication mode (async/sync)
+- [x] x402 payment protection for webhook endpoints
 - [ ] WebSocket support for real-time bidirectional communication
 - [ ] Support for additional LLM providers (Anthropic, Cohere, etc.)
 - [ ] Web dashboard for agent monitoring and payment tracking
@@ -1025,7 +1262,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ ] Enhanced security features (rate limiting, access control)
 - [ ] Performance optimizations for high-throughput scenarios
 - [ ] x402 payment analytics and budgeting tools
-- [ ] Webhook authentication and rate limiting
+- [ ] Webhook authentication and advanced rate limiting
 
 ---
 
