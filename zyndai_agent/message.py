@@ -58,6 +58,7 @@ class AgentMessage:
         """Convert message to dictionary format."""
         return {
             "content": self.content,
+            "prompt": self.content,
             "sender_id": self.sender_id,
             "sender_did": self.sender_did,
             "receiver_id": self.receiver_id,
@@ -77,7 +78,7 @@ class AgentMessage:
     def from_dict(cls, data: Dict[str, Any]) -> 'AgentMessage':
         """Create message object from dictionary data."""
         return cls(
-            content=data.get("content", ""),
+            content=data.get("prompt", data.get("content", "")),
             sender_id=data.get("sender_id", "unknown"),
             sender_did=data.get("sender_did", "unknown"),
             receiver_id=data.get("receiver_id"),
