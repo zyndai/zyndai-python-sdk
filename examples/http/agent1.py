@@ -17,34 +17,20 @@ if __name__ == "__main__":
 
     # Create agent config with webhook settings
 
-    """
-    Webhook Configuration:
-        webhook_host:
-            Host address to bind the webhook server (0.0.0.0 allows external connections)
-        webhook_port:
-            Port number for the webhook server (5001 for agent2)
-        webhook_url:
-            Optional public URL if behind NAT/proxy (auto-generated if None)
-        auto_reconnect:
-            Auto-restart the webhook server if it fails
-        message_history_limit:
-            Store <limit> number of past messages for better context
-        registry_url:
-            Zynd AI agent registry URL
-        identity_credential_path:
-            File path of credential document of the agent downloaded from the Zynd AI dashboard
-        secret_seed:
-            Seed string of agent downloaded from the Zynd AI dashboard
-    """
     agent_config = AgentConfig(
+        name="Agent 1",
+        description="A helpful search agent",
+        capabilities={
+            "ai": ["nlp"],
+            "protocols": ["http"]
+        },
         webhook_host="0.0.0.0",
-        webhook_port=5001,  # Agent 2 uses port 5001 (different from agent1)
-        webhook_url=None,  # Will auto-generate http://localhost:5001/webhook
+        webhook_port=5001,
         auto_reconnect=True,
         message_history_limit=100,
         registry_url="https://registry.zynd.ai",
-        identity_credential_path="zynd-agent/examples/identity_credential2.json",
-        secret_seed=os.environ["AGENT2_SEED"]
+        price="$0.01",
+        api_key=os.environ["ZYND_API_KEY"]
     )
 
     # Init zynd agent sdk wrapper
@@ -85,14 +71,17 @@ if __name__ == "__main__":
         # Add AI response to history
         message_history.add_ai_message(agent_output)
 
-        zynd_agent.send_message(agent_output)
+        # Set the response for synchronous mode
+        zynd_agent.set_response(message.message_id, agent_output)
+
+        # Also send via webhook if target is connected (for agent-to-agent communication)
+        if zynd_agent.target_webhook_url:
+            zynd_agent.send_message(agent_output)
 
     zynd_agent.add_message_handler(message_handler)
 
 
     # Main loop
-    print("\nWebhook Agent 2 is running!")
-    print(f"Webhook URL: {zynd_agent.webhook_url}")
     print("Type 'Exit' to quit\n")
 
     while True:
