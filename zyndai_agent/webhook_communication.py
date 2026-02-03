@@ -234,10 +234,11 @@ class WebhookCommunicationManager:
                 # Update actual port used
                 self.webhook_port = port
 
-                # Update webhook URL if not manually configured
+                # Auto-form webhook URL from host and port
                 if self.webhook_url is None:
-                    # Use localhost for local development, can be overridden
-                    self.webhook_url = f"http://localhost:{port}/webhook"
+                    host = "localhost" if self.webhook_host == "0.0.0.0" else self.webhook_host
+                    scheme = "https" if port == 443 else "http"
+                    self.webhook_url = f"{scheme}://{host}:{port}/webhook"
 
                 self.is_running = True
                 server_started = True

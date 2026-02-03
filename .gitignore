@@ -6,3 +6,6 @@ dist
 
 zyndai_agent.egg-info
 __pycache__
+
+.agent
+.venv

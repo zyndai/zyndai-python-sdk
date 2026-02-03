@@ -5,6 +5,7 @@ from zyndai_agent.message import AgentMessage
 from zyndai_agent.search import SearchAndDiscoveryManager, AgentSearchResponse
 from zyndai_agent.identity import IdentityManager
 from zyndai_agent.payment import X402PaymentProcessor
+from zyndai_agent.config_manager import ConfigManager
 
 __all__ = [
     "ZyndAIAgent",
@@ -17,4 +18,5 @@ __all__ = [
     "AgentSearchResponse",
     "IdentityManager",
     "X402PaymentProcessor",
+    "ConfigManager",
 ]
