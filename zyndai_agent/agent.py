@@ -32,6 +32,9 @@ class AgentConfig(BaseModel):
 
     price: Optional[str] = None
 
+    # Config directory for agent identity (allows multiple agents in same project)
+    config_dir: Optional[str] = None  # e.g., ".agent-stock" or ".agent-user"
+
 class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcessor, WebhookCommunicationManager):
 
     def __init__(self, agent_config: AgentConfig):
@@ -126,20 +129,19 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
 
         headers = {
             "accept": "*/*",
-            "Content-Type": "application/json",
             "X-API-KEY": self.agent_config.api_key
         }
 
-        payload = json.dumps({
+        payload = {
             "agentId": self.registry_agent_id,
             "httpWebhookUrl": self.webhook_url
-        })
+        }
 
-        print(payload,"======")
+        print(f"Updating webhook URL: {payload}")
 
         updateResponse = requests.patch(
             f"{self.agent_config.registry_url}/agents/update-webhook",
-            data=payload,
+            json=payload,
             headers=headers
         )
 

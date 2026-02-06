@@ -12,21 +12,23 @@ class ConfigManager:
     saved config so the user doesn't need to provide identity credentials manually.
     """
 
-    CONFIG_DIR = ".agent"
+    DEFAULT_CONFIG_DIR = ".agent"
     CONFIG_FILE = "config.json"
 
     @staticmethod
-    def _config_path():
-        return os.path.join(os.getcwd(), ConfigManager.CONFIG_DIR, ConfigManager.CONFIG_FILE)
+    def _config_path(config_dir: str = None):
+        dir_name = config_dir or ConfigManager.DEFAULT_CONFIG_DIR
+        return os.path.join(os.getcwd(), dir_name, ConfigManager.CONFIG_FILE)
 
     @staticmethod
-    def _config_dir():
-        return os.path.join(os.getcwd(), ConfigManager.CONFIG_DIR)
+    def _config_dir(config_dir: str = None):
+        dir_name = config_dir or ConfigManager.DEFAULT_CONFIG_DIR
+        return os.path.join(os.getcwd(), dir_name)
 
     @staticmethod
-    def load_config():
+    def load_config(config_dir: str = None):
         """Load existing config from .agent/config.json. Returns None if not found."""
-        config_path = ConfigManager._config_path()
+        config_path = ConfigManager._config_path(config_dir)
         if not os.path.exists(config_path):
             return None
 
@@ -37,19 +39,19 @@ class ConfigManager:
         return config
 
     @staticmethod
-    def save_config(config: dict):
+    def save_config(config: dict, config_dir: str = None):
         """Save config to .agent/config.json, creating the directory if needed."""
-        config_dir = ConfigManager._config_dir()
-        os.makedirs(config_dir, exist_ok=True)
+        dir_path = ConfigManager._config_dir(config_dir)
+        os.makedirs(dir_path, exist_ok=True)
 
-        config_path = ConfigManager._config_path()
+        config_path = ConfigManager._config_path(config_dir)
         with open(config_path, "w") as f:
             json.dump(config, f, indent=2)
 
         print(f"Saved agent config to {config_path}")
 
     @staticmethod
-    def create_agent(registry_url: str, api_key: str, name: str, description: str, capabilities: dict):
+    def create_agent(registry_url: str, api_key: str, name: str, description: str, capabilities: dict, config_dir: str = None):
         """
         Create a new agent via the registry API.
 
@@ -59,6 +61,7 @@ class ConfigManager:
             name: Agent display name
             description: Agent description
             capabilities: Agent capabilities dict (e.g. {"ai": ["nlp"], "protocols": ["http"]})
+            config_dir: Custom config directory (e.g., ".agent-stock")
 
         Returns:
             dict: The saved config with id, didIdentifier, did, name, description, seed
@@ -104,7 +107,7 @@ class ConfigManager:
             "seed": data["seed"]
         }
 
-        ConfigManager.save_config(config)
+        ConfigManager.save_config(config, config_dir)
         return config
 
     @staticmethod
@@ -117,12 +120,13 @@ class ConfigManager:
 
         Args:
             agent_config: AgentConfig instance with registry_url, api_key, name,
-                          description, and capabilities
+                          description, capabilities, and optional config_dir
 
         Returns:
             dict with keys: id, didIdentifier, did, name, description, seed
         """
-        config = ConfigManager.load_config()
+        config_dir = getattr(agent_config, 'config_dir', None)
+        config = ConfigManager.load_config(config_dir)
         if config is not None:
             return config
 
@@ -137,11 +141,13 @@ class ConfigManager:
         if not agent_config.capabilities:
             raise ValueError("capabilities is required in AgentConfig to create a new agent.")
 
-        print("No .agent/config.json found. Creating a new agent...")
+        dir_name = config_dir or ConfigManager.DEFAULT_CONFIG_DIR
+        print(f"No {dir_name}/config.json found. Creating a new agent...")
         return ConfigManager.create_agent(
             registry_url=agent_config.registry_url,
             api_key=agent_config.api_key,
             name=agent_config.name,
             description=agent_config.description,
-            capabilities=agent_config.capabilities
+            capabilities=agent_config.capabilities,
+            config_dir=config_dir
         )

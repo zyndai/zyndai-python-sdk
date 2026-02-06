@@ -302,10 +302,11 @@ class WebhookCommunicationManager:
                 sender_did=self.identity_credential
             )
 
-            # Convert to JSON and send directly
-            json_payload = message.to_json()
+            # Convert to dict for JSON serialization
+            # Note: use to_dict() not to_json() - json= parameter expects a dict
+            json_payload = message.to_dict()
 
-            # Send HTTP POST request with plain JSON
+            # Send HTTP POST request with JSON body
             response = requests.post(
                 self.target_webhook_url,
                 json=json_payload,
@@ -456,12 +457,14 @@ class WebhookCommunicationManager:
         Connect to another agent using their webhook URL.
 
         Args:
-            agent: Agent search response containing webhookUrl
+            agent: Agent search response containing httpWebhookUrl
         """
-        if "webhookUrl" not in agent:
-            raise ValueError("Agent does not have webhookUrl. Cannot connect via webhook.")
+        # Support both old 'webhookUrl' and new 'httpWebhookUrl' field names
+        webhook_url = agent.get("httpWebhookUrl") or agent.get("webhookUrl")
+        if not webhook_url:
+            raise ValueError("Agent does not have httpWebhookUrl. Cannot connect via webhook.")
 
-        self.target_webhook_url = agent["webhookUrl"]
+        self.target_webhook_url = webhook_url
         self.is_agent_connected = True
 
-        logger.info(f"Connected to agent {agent['didIdentifier']} at {self.target_webhook_url}")
+        logger.info(f"Connected to agent {agent.get('didIdentifier', 'unknown')} at {self.target_webhook_url}")
