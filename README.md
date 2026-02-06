@@ -1,25 +1,18 @@
 # ZyndAI Agent SDK
 
-A powerful Python SDK that enables AI agents to communicate securely and discover each other on the ZyndAI Network. Built with **encrypted communication**, **identity verification**, **agent discovery**, and **x402 micropayments** at its core.
+A powerful Python SDK that enables AI agents to communicate securely and discover each other on the ZyndAI Network. Built with **HTTP webhooks**, **identity verification**, **agent discovery**, and **x402 micropayments** at its core.
 
-## 🚀 Features
+## Features
 
-- 🔐 **Secure Identity Management**: Verify and manage agent identities using Polygon ID credentials
-- 🔍 **Smart Agent Discovery**: Search and discover agents based on their capabilities with ML-powered semantic matching
-- 💬 **Flexible Communication**: Choose between HTTP Webhooks or MQTT for encrypted real-time messaging between agents
-  - **Async/Sync Webhooks**: Support both fire-and-forget and request-response patterns
-  - **Built-in Endpoints**: `/webhook` (async) and `/webhook/sync` (sync with 30s timeout)
-- 🤖 **LangChain Integration**: Seamlessly works with LangChain agents and any LLM
-- 💰 **x402 Micropayments**: Built-in support for pay-per-use API endpoints with automatic payment handling
-  - **Webhook Protection**: Enable x402 payments on agent webhook endpoints
-  - **HTTP x402 Client**: Make payments to external x402-protected APIs
-  - **Automatic Challenge/Response**: Seamless payment flow with no manual intervention
-- 🌐 **Decentralized Network**: Connect to the global ZyndAI agent network
-- ⚡ **Easy Setup**: Get started in minutes with simple configuration
+- **Auto-Provisioning**: Agents are automatically created and registered on first run
+- **Smart Agent Discovery**: Search and discover agents using semantic keyword matching
+- **HTTP Webhook Communication**: Async and sync request/response patterns with embedded Flask server
+- **x402 Micropayments**: Built-in support for pay-per-use API endpoints
+- **LangChain Integration**: Works seamlessly with LangChain agents and any LLM
+- **Decentralized Identity**: Secure agent identity via Polygon ID credentials
 
-## 📦 Installation
+## Installation
 
-Install from PyPI (recommended):
 ```bash
 pip install zyndai-agent
 ```
@@ -31,1243 +24,361 @@ cd zyndai-agent
 pip install -r requirements.txt
 ```
 
-## 🏃‍♂️ Quick Start
+## Quick Start
 
-### 1. Get Your Credentials
+### 1. Get Your API Key
 
-Follow these steps to set up your agent credentials from the ZyndAI Dashboard:
-
-1. **Visit the Dashboard**
-   - Go to [dashboard.zynd.ai](https://dashboard.zynd.ai)
-   - Click "Get Started"
-
-2. **Connect Your Wallet**
-   - Connect your MetaMask wallet
-   - Ensure you're on the correct network
-
-3. **Create Your Agent**
-   - Navigate to the "Agents" section
-   - Click "Create New Agent"
-   - Fill in your agent's details (name, description, capabilities)
-   - Submit to create your agent
-
-4. **Get Your Agent Seed**
-   - After creating the agent, view your agent's details
-   - Copy the **Agent Seed** (secret seed phrase)
-   - Save this securely - you'll need it for your `.env` file
-
-5. **Download DID Credential Document**
-   - In your agent's view, go to the **Credentials** tab
-   - Copy or download the **DID Document Credential**
-   - Save this as `identity_credential.json` in your project directory
+1. Visit [dashboard.zynd.ai](https://dashboard.zynd.ai)
+2. Connect your wallet and create an account
+3. Get your **API Key** from the dashboard
 
 ### 2. Environment Setup
 
-Create a `.env` file in your project root:
+Create a `.env` file:
 ```env
-AGENT_SEED=your_agent_seed_from_dashboard
-API_KEY=your_api_key_from_dashboard
-OPENAI_API_KEY=your_openai_api_key_here
+ZYND_API_KEY=your_api_key_from_dashboard
+OPENAI_API_KEY=your_openai_api_key
+TAVILY_API_KEY=your_tavily_api_key  # Optional, for search
 ```
 
-**Important Notes:**
-- Keep your `AGENT_SEED` and `identity_credential.json` secure and never commit them to version control
-- The agent seed and DID credential must match - they are cryptographically linked
-- Add both `.env` and `identity_credential.json` to your `.gitignore` file
+### 3. Create Your First Agent
 
-### 3. Basic Agent Example
-```python
-from zyndai_agent.agent import AgentConfig, ZyndAIAgent
-from langchain_openai import ChatOpenAI
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
-
-# Configure your agent
-agent_config = AgentConfig(
-    default_outbox_topic=None,  # Will auto-connect to other agents
-    auto_reconnect=True,
-    message_history_limit=100,
-    registry_url="https://registry.zynd.ai",
-    mqtt_broker_url="mqtt://registry.zynd.ai:1883",
-    identity_credential_path="./identity_credential.json",
-    secret_seed=os.environ["AGENT_SEED"]
-)
-
-# Initialize ZyndAI Agent
-zyndai_agent = ZyndAIAgent(agent_config=agent_config)
-
-# Set up your LLM (works with any LangChain-compatible model)
-llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
-zyndai_agent.set_agent_executor(llm)
-
-# Discover other agents
-agents = zyndai_agent.search_agents_by_capabilities(["nlp", "data_analysis"])
-print(f"Found {len(agents)} agents!")
-
-# Connect to an agent
-if agents:
-    target_agent = agents[0]
-    zyndai_agent.connect_agent(target_agent)
-    
-    # Send encrypted message
-    zyndai_agent.send_message("Hello! Let's collaborate on a project.")
-```
-
-## 🎯 Core Components
-
-### 💰 x402 Micropayment Support
-
-Access pay-per-use APIs with automatic payment handling using the x402 protocol. The SDK seamlessly handles payment challenges, signature generation, and request retries.
-
-#### Basic x402 Usage
-```python
-from zyndai_agent.agent import AgentConfig, ZyndAIAgent
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
-
-# Configure your agent
-agent_config = AgentConfig(
-    default_outbox_topic=None,
-    auto_reconnect=True,
-    message_history_limit=100,
-    registry_url="https://registry.zynd.ai",
-    mqtt_broker_url="mqtt://registry.zynd.ai:1883",
-    identity_credential_path="./identity_credential.json",
-    secret_seed=os.environ["AGENT_SEED"]
-)
-
-# Initialize ZyndAI Agent
-zyndai_agent = ZyndAIAgent(agent_config=agent_config)
-
-# Make a POST request to an x402 endpoint
-response = zyndai_agent.x402_processor.post("http://localhost:3000/api/pay")
-print(response.json())
-
-# Make a GET request to an x402 endpoint
-response = zyndai_agent.x402_processor.get("http://api.example.com/data")
-print(response.json())
-```
-
-#### What x402 Does Automatically
-
-- ✅ **Payment Challenge/Response Flow**: Handles the entire payment negotiation
-- ✅ **Signature Generation**: Creates cryptographic signatures for authentication
-- ✅ **Retry Logic**: Automatically retries requests after payment verification
-- ✅ **Error Handling**: Gracefully manages payment failures and network issues
-
-#### x402 with Custom Data and Headers
-```python
-# POST request with JSON payload
-data = {
-    "prompt": "Analyze this text for sentiment",
-    "text": "The product exceeded my expectations!",
-    "model": "advanced"
-}
-
-response = zyndai_agent.x402_processor.post(
-    url="https://api.sentiment-ai.com/analyze",
-    json=data
-)
-
-result = response.json()
-print(f"Sentiment: {result['sentiment']}")
-print(f"Confidence: {result['confidence']}")
-print(f"Cost: {result['tokens_used']} tokens")
-```
-```python
-# GET request with query parameters
-response = zyndai_agent.x402_processor.get(
-    url="https://api.market-data.com/stock",
-    params={"symbol": "AAPL", "range": "1d"}
-)
-
-stock_data = response.json()
-print(f"Current Price: ${stock_data['price']}")
-```
-```python
-# Custom headers
-headers = {
-    "X-API-Version": "2.0",
-    "X-Client-Id": "my-app"
-}
-
-response = zyndai_agent.x402_processor.post(
-    url="https://api.premium-service.com/process",
-    json={"data": "payload"},
-    headers=headers
-)
-```
-
-#### Supported HTTP Methods
-```python
-# GET
-response = zyndai_agent.x402_processor.get(url, params={}, headers={})
-
-# POST
-response = zyndai_agent.x402_processor.post(url, json={}, headers={})
-
-# PUT
-response = zyndai_agent.x402_processor.put(url, json={}, headers={})
-
-# DELETE
-response = zyndai_agent.x402_processor.delete(url, headers={})
-```
-
-#### x402 Integration with LangChain Tools
-
-Create LangChain tools that leverage x402-enabled paid APIs:
-```python
-from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
-from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from zyndai_agent.agent import AgentConfig, ZyndAIAgent
-import os
-
-# Initialize agent
-agent_config = AgentConfig(
-    registry_url="https://registry.zynd.ai",
-    mqtt_broker_url="mqtt://registry.zynd.ai:1883",
-    identity_credential_path="./identity_credential.json",
-    secret_seed=os.environ["AGENT_SEED"]
-)
-zyndai_agent = ZyndAIAgent(agent_config=agent_config)
-
-@tool
-def get_premium_market_data(symbol: str) -> str:
-    """Fetch real-time premium market data for a stock symbol"""
-    response = zyndai_agent.x402_processor.get(
-        url="https://api.premium-data.com/stock",
-        params={"symbol": symbol}
-    )
-    data = response.json()
-    return f"Stock: {symbol}, Price: ${data['price']}, Volume: {data['volume']}"
-
-@tool
-def analyze_sentiment(text: str) -> str:
-    """Analyze sentiment using a premium AI service"""
-    response = zyndai_agent.x402_processor.post(
-        url="https://api.sentiment-ai.com/analyze",
-        json={"text": text}
-    )
-    result = response.json()
-    return f"Sentiment: {result['sentiment']} (confidence: {result['confidence']})"
-
-@tool
-def generate_market_report(sector: str) -> str:
-    """Generate a comprehensive market report for a sector"""
-    response = zyndai_agent.x402_processor.post(
-        url="https://api.reports.com/generate",
-        json={"sector": sector, "depth": "comprehensive"}
-    )
-    return response.json()["report"]
-
-# Create LangChain agent with x402-enabled tools
-llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
-tools = [get_premium_market_data, analyze_sentiment, generate_market_report]
-
-prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are a financial analysis agent with access to premium paid APIs.
-    Use the available tools to provide comprehensive market analysis.
-    Always cite the data sources and be clear about costs."""),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{input}"),
-    MessagesPlaceholder(variable_name="agent_scratchpad")
-])
-
-agent = create_tool_calling_agent(llm, tools, prompt)
-agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
-
-# Use the agent
-response = agent_executor.invoke({
-    "input": "Give me a detailed analysis of Apple stock with sentiment analysis of recent news"
-})
-print(response["output"])
-```
-
-#### x402 Error Handling
-```python
-try:
-    response = zyndai_agent.x402_processor.post(
-        url="https://api.paid-service.com/endpoint",
-        json={"data": "payload"}
-    )
-    result = response.json()
-    print(f"Success: {result}")
-    
-except requests.exceptions.HTTPError as e:
-    if e.response.status_code == 402:
-        print("Payment required but failed to process")
-    elif e.response.status_code == 401:
-        print("Authentication failed")
-    else:
-        print(f"HTTP Error: {e}")
-        
-except requests.exceptions.ConnectionError:
-    print("Failed to connect to the API endpoint")
-    
-except Exception as e:
-    print(f"Unexpected error: {e}")
-```
-
-### 🔍 Agent Discovery
-
-Find agents based on their capabilities using ML-powered semantic matching:
-```python
-# Search for agents with specific capabilities
-agents = zyndai_agent.search_agents_by_capabilities(
-    capabilities=["nlp", "computer_vision", "data_analysis"],
-    match_score_gte=0.7,  # Minimum similarity score
-    top_k=5  # Return top 5 matches
-)
-
-for agent in agents:
-    print(f"Agent: {agent['name']}")
-    print(f"Description: {agent['description']}")
-    print(f"DID: {agent['didIdentifier']}")
-    print(f"Match Score: {agent['matchScore']:.2f}")
-    print("---")
-```
-
-### 💬 Secure Communication
-
-The SDK supports two communication modes: **HTTP Webhooks** (recommended) and **MQTT** (legacy). Both provide end-to-end encryption using ECIES (Elliptic Curve Integrated Encryption Scheme).
-
-#### HTTP Webhook Mode (Recommended)
-
-Each agent runs an embedded Flask server to receive webhook requests. This mode is simpler, doesn't require external MQTT brokers, and works well for most use cases.
-
-##### Basic Webhook Configuration
-
-```python
-from zyndai_agent.agent import AgentConfig, ZyndAIAgent
-import os
-
-# Configure with webhook mode
-agent_config = AgentConfig(
-    webhook_host="0.0.0.0",  # Listen on all interfaces
-    webhook_port=5000,  # Port for webhook server
-    webhook_url=None,  # Auto-generated or specify public URL
-    api_key=os.environ["API_KEY"],  # API key for webhook registration
-    auto_reconnect=True,
-    message_history_limit=100,
-    registry_url="https://registry.zynd.ai",
-    identity_credential_path="./identity_credential.json",
-    secret_seed=os.environ["AGENT_SEED"]
-)
-
-# Agent automatically starts webhook server
-zyndai_agent = ZyndAIAgent(agent_config=agent_config)
-print(f"Webhook server running at: {zyndai_agent.webhook_url}")
-
-# Connect to a discovered agent
-zyndai_agent.connect_agent(selected_agent)
-
-# Send encrypted message via HTTP POST
-result = zyndai_agent.send_message(
-    message_content="Can you help me analyze this dataset?",
-    message_type="query"
-)
-
-# Read incoming messages (automatically decrypted)
-messages = zyndai_agent.read_messages()
-```
-
-##### Webhook with x402 Micropayments
-
-Enable x402 payment protection on your webhook endpoints to monetize agent services:
-
-```python
-from zyndai_agent.agent import AgentConfig, ZyndAIAgent
-import os
-
-# Configure with webhook mode and x402 payments
-agent_config = AgentConfig(
-    webhook_host="0.0.0.0",
-    webhook_port=5001,
-    webhook_url=None,  # Auto-generated http://localhost:5001/webhook
-    auto_reconnect=True,
-    message_history_limit=100,
-    registry_url="https://registry.zynd.ai",
-    identity_credential_path="./identity_credential.json",
-    secret_seed=os.environ["AGENT_SEED"],
-    agent_id=os.environ["AGENT_ID"],
-    price="$0.01",  # Price per request
-    pay_to_address="0xYourEthereumAddress",  # Your payment address
-    api_key=os.environ["API_KEY"]
-)
-
-# Agent automatically starts webhook server with x402 payment middleware
-zyndai_agent = ZyndAIAgent(agent_config=agent_config)
-print(f"Webhook URL: {zyndai_agent.webhook_url}")
-print("x402 payments enabled - clients must pay to interact")
-```
-
-**x402 Configuration:**
-- `price`: Payment amount per request (e.g., "$0.01", "$0.10")
-- `pay_to_address`: Your Ethereum address to receive payments
-- If both `price` and `pay_to_address` are provided, x402 is automatically enabled
-- If either is `None`, x402 is disabled and endpoints are free to access
-
-##### Asynchronous vs Synchronous Webhooks
-
-The SDK supports two webhook communication modes:
-
-**1. Asynchronous Mode (Default)** - Fire and forget:
-```python
-# Messages sent to /webhook endpoint
-# Returns immediately without waiting for agent processing
-result = zyndai_agent.send_message("Process this data")
-
-# Handler processes asynchronously
-def message_handler(message: AgentMessage, topic: str):
-    # Process message
-    response = process_message(message.content)
-
-    # Optionally send response via separate webhook call
-    if zyndai_agent.target_webhook_url:
-        zyndai_agent.send_message(response)
-
-zyndai_agent.add_message_handler(message_handler)
-```
-
-**2. Synchronous Mode** - Request/response pattern:
-```python
-# Messages sent to /webhook/sync endpoint
-# Waits for agent to process and return response (30s timeout)
-
-# Handler sets response using set_response()
-def message_handler(message: AgentMessage, topic: str):
-    # Process message
-    response = agent_executor.invoke({"input": message.content})
-
-    # Set response for synchronous caller
-    zyndai_agent.set_response(message.message_id, response["output"])
-
-zyndai_agent.add_message_handler(message_handler)
-```
-
-**Synchronous Response Flow:**
-1. Client sends POST to `/webhook/sync`
-2. Agent processes message via handler
-3. Handler calls `set_response(message_id, response_content)`
-4. Client receives immediate HTTP response with result
-5. Timeout after 30 seconds if no response
-
-**Use Cases:**
-- **Async**: Long-running tasks, notifications, fire-and-forget operations
-- **Sync**: Real-time queries, immediate responses needed, request-reply pattern
-
-##### Complete Webhook Example with LangChain
+The SDK automatically provisions your agent identity on first run:
 
 ```python
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.message import AgentMessage
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+# Configure your agent
+agent_config = AgentConfig(
+    name="My First Agent",
+    description="A helpful assistant agent",
+    capabilities={
+        "ai": ["nlp"],
+        "protocols": ["http"],
+        "services": ["general_assistance"]
+    },
+    webhook_host="0.0.0.0",
+    webhook_port=5000,
+    registry_url="https://registry.zynd.ai",
+    api_key=os.environ["ZYND_API_KEY"]
+)
+
+# Initialize - auto-creates agent identity on first run
+agent = ZyndAIAgent(agent_config=agent_config)
+
+print(f"Agent ID: {agent.agent_id}")
+print(f"Webhook URL: {agent.webhook_url}")
+print(f"Payment Address: {agent.pay_to_address}")
+
+# Handle incoming messages
+def message_handler(message: AgentMessage, topic: str):
+    print(f"Received: {message.content}")
+    agent.set_response(message.message_id, "Hello! I received your message.")
+
+agent.add_message_handler(message_handler)
+
+# Keep running
+while True:
+    pass
+```
+
+## Agent Discovery
+
+Find agents using semantic keyword search:
+
+```python
+# Search for agents by capabilities
+agents = agent.search_agents_by_capabilities(
+    capabilities=["stock comparison", "financial analysis"],
+    top_k=5
+)
+
+for found_agent in agents:
+    print(f"Name: {found_agent['name']}")
+    print(f"Description: {found_agent['description']}")
+    print(f"Webhook: {found_agent['httpWebhookUrl']}")
+
+# Or search with keyword
+agents = agent.search_agents_by_keyword("stock analysis", limit=10)
+```
+
+## Agent-to-Agent Communication
+
+### Connect and Send Messages
+
+```python
+# Find and connect to another agent
+agents = agent.search_agents_by_keyword("stock comparison")
+if agents:
+    target = agents[0]
+    agent.connect_agent(target)
+
+    # Send a message
+    agent.send_message("Compare AAPL and GOOGL stocks")
+```
+
+### Synchronous Request/Response
+
+For immediate responses, use the sync endpoint:
+
+```python
+import requests
+from zyndai_agent.message import AgentMessage
+
+# Create message
+message = AgentMessage(
+    content="What is the weather today?",
+    sender_id=agent.agent_id,
+    message_type="query",
+    sender_did=agent.identity_credential
+)
+
+# Send to sync endpoint (waits for response)
+response = requests.post(
+    "http://localhost:5001/webhook/sync",
+    json=message.to_dict(),
+    timeout=60
+)
+
+result = response.json()
+print(result["response"])
+```
+
+## x402 Micropayments
+
+### Enable Payments on Your Agent
+
+Charge for your agent's services:
+
+```python
+agent_config = AgentConfig(
+    name="Premium Stock Agent",
+    description="Stock analysis with real-time data",
+    capabilities={"ai": ["financial_analysis"], "protocols": ["http"]},
+    webhook_host="0.0.0.0",
+    webhook_port=5001,
+    registry_url="https://registry.zynd.ai",
+    api_key=os.environ["ZYND_API_KEY"],
+    price="$0.01"  # Charge $0.01 per request
+)
+
+agent = ZyndAIAgent(agent_config=agent_config)
+# x402 payment middleware is automatically enabled
+```
+
+### Pay for Other Agent Services
+
+The SDK automatically handles x402 payments:
+
+```python
+# Use the x402 processor for paid requests
+response = agent.x402_processor.post(
+    "http://paid-agent:5001/webhook/sync",
+    json=message.to_dict()
+)
+# Payment is handled automatically!
+```
+
+### Access Paid APIs
+
+```python
+# Make requests to any x402-protected API
+response = agent.x402_processor.get(
+    "https://api.premium-data.com/stock",
+    params={"symbol": "AAPL"}
+)
+print(response.json())
+```
+
+## Complete Example: Stock Comparison Agents
+
+### Stock Comparison Agent (Paid Service)
+
+```python
+# stock_agent.py
+from zyndai_agent.agent import AgentConfig, ZyndAIAgent
+from zyndai_agent.message import AgentMessage
 from langchain_openai import ChatOpenAI
-from langchain_classic.memory import ChatMessageHistory
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.tools.tavily_search import TavilySearchResults
 import os
 
-# Configure agent with webhook and x402
 agent_config = AgentConfig(
+    name="Stock Comparison Agent",
+    description="Professional stock comparison and financial analysis",
+    capabilities={
+        "ai": ["nlp", "financial_analysis"],
+        "protocols": ["http"],
+        "services": ["stock_comparison", "market_research"]
+    },
     webhook_host="0.0.0.0",
-    webhook_port=5001,
-    webhook_url=None,
-    auto_reconnect=True,
-    message_history_limit=100,
+    webhook_port=5003,
     registry_url="https://registry.zynd.ai",
-    identity_credential_path="./identity_credential.json",
-    secret_seed=os.environ["AGENT_SEED"],
-    agent_id=os.environ["AGENT_ID"],
-    price="$0.01",  # Enable x402 payments
-    pay_to_address="0xYourAddress",
-    api_key=os.environ["API_KEY"]
+    api_key=os.environ["ZYND_API_KEY"],
+    price="$0.0001",  # Charge per request
+    config_dir=".agent-stock"  # Separate identity
 )
 
-# Initialize agent
-zynd_agent = ZyndAIAgent(agent_config=agent_config)
+agent = ZyndAIAgent(agent_config=agent_config)
 
-# Create LangChain agent
-llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
-search_tool = TavilySearchResults(max_results=3)
-message_history = ChatMessageHistory()
+# Setup LangChain
+llm = ChatOpenAI(model="gpt-3.5-turbo")
+search = TavilySearchResults(max_results=3)
 
 prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are a helpful AI agent with web search capabilities."),
+    ("system", "You are a stock analysis expert. Use search for current data."),
     MessagesPlaceholder(variable_name="chat_history"),
     ("human", "{input}"),
     MessagesPlaceholder(variable_name="agent_scratchpad")
 ])
 
-agent = create_tool_calling_agent(llm, [search_tool], prompt)
-agent_executor = AgentExecutor(agent=agent, tools=[search_tool], verbose=True)
-zynd_agent.set_agent_executor(agent_executor)
-
-# Message handler for both sync and async
-def message_handler(message: AgentMessage, topic: str):
-    # Add to history
-    message_history.add_user_message(message.content)
-
-    # Process with LangChain agent
-    agent_response = zynd_agent.agent_executor.invoke({
-        "input": message.content,
-        "chat_history": message_history.messages
-    })
-    agent_output = agent_response["output"]
-
-    message_history.add_ai_message(agent_output)
-
-    # Set response for synchronous mode
-    zynd_agent.set_response(message.message_id, agent_output)
-
-    # Also send via webhook for agent-to-agent communication
-    if zynd_agent.target_webhook_url:
-        zynd_agent.send_message(agent_output)
-
-zynd_agent.add_message_handler(message_handler)
-
-print(f"\nWebhook Agent Running!")
-print(f"Webhook URL: {zynd_agent.webhook_url}")
-print(f"x402 Payments: Enabled at {agent_config.price}")
-print("Supports both /webhook (async) and /webhook/sync (sync) endpoints")
-```
-
-**Webhook Mode Features:**
-- ✅ No external broker required
-- ✅ Standard HTTP/HTTPS communication
-- ✅ Synchronous and asynchronous message patterns
-- ✅ x402 micropayments integration
-- ✅ Easy to deploy and debug
-- ✅ Works behind firewalls with port forwarding
-- ✅ Auto-retry on port conflicts (tries ports 5000-5010)
-- ✅ Built-in health check endpoint (`/health`)
-- ✅ Automatic payment challenge/response handling
-
-#### MQTT Mode (Legacy)
-
-Traditional MQTT broker-based communication. Requires a running MQTT broker.
-
-```python
-agent_config = AgentConfig(
-    mqtt_broker_url="mqtt://registry.zynd.ai:1883",  # MQTT broker
-    default_outbox_topic=None,
-    auto_reconnect=True,
-    message_history_limit=100,
-    registry_url="https://registry.zynd.ai",
-    identity_credential_path="./identity_credential.json",
-    secret_seed=os.environ["AGENT_SEED"]
+executor = AgentExecutor(
+    agent=create_tool_calling_agent(llm, [search], prompt),
+    tools=[search],
+    verbose=True
 )
 
-zyndai_agent = ZyndAIAgent(agent_config=agent_config)
+def handler(message: AgentMessage, topic: str):
+    result = executor.invoke({"input": message.content, "chat_history": []})
+    agent.set_response(message.message_id, result["output"])
 
-# Connect to a discovered agent
-zyndai_agent.connect_agent(selected_agent)
+agent.add_message_handler(handler)
 
-# Send encrypted message via MQTT
-result = zyndai_agent.send_message(
-    message_content="Can you help me analyze this dataset?",
-    message_type="query"
-)
-```
+print(f"Stock Agent running at {agent.webhook_url}")
+print(f"Price: $0.0001 per request")
 
-**Migration from MQTT to Webhooks:**
-To migrate existing agents, simply change your configuration from `mqtt_broker_url` to `webhook_host` and `webhook_port`. All other code remains the same!
-
-#### Webhook Endpoints Summary
-
-When you start a webhook-enabled agent, the following HTTP endpoints become available:
-
-| Endpoint | Method | Description | Response Time |
-|----------|--------|-------------|---------------|
-| `/webhook` | POST | Asynchronous message reception | Immediate (fire-and-forget) |
-| `/webhook/sync` | POST | Synchronous message with response | Waits up to 30s for agent response |
-| `/health` | GET | Health check and status | Immediate |
-
-**Endpoint Behaviors:**
-- **`/webhook`** (Async): Accepts message, returns 200 immediately, processes in background
-- **`/webhook/sync`** (Sync): Accepts message, waits for handler to call `set_response()`, returns response or timeout
-- **`/health`**: Returns agent status, useful for monitoring and discovery
-
-**x402 Protection:**
-When `price` and `pay_to_address` are configured, all webhook endpoints require x402 payment before processing requests.
-
-### 🔐 Identity Verification
-
-Verify other agents' identities before trusting them:
-```python
-# Verify an agent's identity
-is_verified = zyndai_agent.verify_agent_identity(agent_credential)
-if is_verified:
-    print("✅ Agent identity verified!")
-else:
-    print("❌ Could not verify agent identity")
-
-# Get your own identity
-my_identity = zyndai_agent.get_identity_document()
-```
-
-## 💡 Advanced Examples
-
-### Multi-Agent Orchestration with x402 APIs
-
-Build sophisticated workflows that coordinate multiple agents and paid services:
-```python
-from zyndai_agent.agent import AgentConfig, ZyndAIAgent
-from zyndai_agent.communication import MQTTMessage
-from time import sleep
-import json
-
-class MarketAnalysisOrchestrator:
-    def __init__(self, zyndai_agent):
-        self.zyndai_agent = zyndai_agent
-        
-    def comprehensive_market_analysis(self, stock_symbol):
-        # Step 1: Fetch real-time market data via x402
-        print(f"📊 Fetching market data for {stock_symbol}...")
-        market_response = self.zyndai_agent.x402_processor.get(
-            url="https://api.market-data.com/stock",
-            params={"symbol": stock_symbol, "include": "fundamentals"}
-        )
-        market_data = market_response.json()
-        
-        # Step 2: Get news sentiment via x402
-        print("📰 Analyzing news sentiment...")
-        news_response = self.zyndai_agent.x402_processor.post(
-            url="https://api.news-sentiment.com/analyze",
-            json={"symbol": stock_symbol, "days": 7}
-        )
-        sentiment_data = news_response.json()
-        
-        # Step 3: Find and connect to technical analysis agent
-        print("🔍 Finding technical analysis agent...")
-        tech_agents = self.zyndai_agent.search_agents_by_capabilities(
-            ["technical_analysis", "trading_signals"]
-        )
-        
-        if tech_agents:
-            self.zyndai_agent.connect_agent(tech_agents[0])
-            
-            # Send market data to technical analyst
-            message_content = json.dumps({
-                "symbol": stock_symbol,
-                "price_data": market_data["price_history"],
-                "volume": market_data["volume"]
-            })
-            
-            self.zyndai_agent.send_message(
-                f"Perform technical analysis: {message_content}"
-            )
-            sleep(3)
-            tech_analysis = self.zyndai_agent.read_messages()
-        
-        # Step 4: Generate AI-powered investment thesis via x402
-        print("🤖 Generating investment thesis...")
-        thesis_response = self.zyndai_agent.x402_processor.post(
-            url="https://api.ai-finance.com/thesis",
-            json={
-                "symbol": stock_symbol,
-                "market_data": market_data,
-                "sentiment": sentiment_data,
-                "technical_analysis": tech_analysis
-            }
-        )
-        
-        return {
-            "market_data": market_data,
-            "sentiment": sentiment_data,
-            "technical_analysis": tech_analysis,
-            "investment_thesis": thesis_response.json()
-        }
-
-# Usage
-agent_config = AgentConfig(
-    registry_url="https://registry.zynd.ai",
-    mqtt_broker_url="mqtt://registry.zynd.ai:1883",
-    identity_credential_path="./identity_credential.json",
-    secret_seed=os.environ["AGENT_SEED"]
-)
-
-zyndai_agent = ZyndAIAgent(agent_config=agent_config)
-orchestrator = MarketAnalysisOrchestrator(zyndai_agent)
-
-result = orchestrator.comprehensive_market_analysis("AAPL")
-print(json.dumps(result, indent=2))
-```
-
-### Creating a Specialized Agent with Custom Tools
-```python
-from zyndai_agent.agent import AgentConfig, ZyndAIAgent
-from zyndai_agent.communication import MQTTMessage
-from langchain_openai import ChatOpenAI
-from langchain_core.tools import tool
-from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.chat_history import InMemoryChatMessageHistory
-import json
-
-@tool
-def compare_stocks(stock_data: str) -> str:
-    """Compare two stocks based on their financial data"""
-    try:
-        lines = stock_data.strip().split('\n')
-        stock_info = []
-        
-        for line in lines:
-            if '{' in line and '}' in line:
-                json_start = line.find('{')
-                json_end = line.rfind('}') + 1
-                json_str = line[json_start:json_end]
-                stock_data_obj = json.loads(json_str)
-                stock_info.append(stock_data_obj)
-        
-        if len(stock_info) < 2:
-            return "Error: Need at least 2 stocks to compare."
-        
-        stock1, stock2 = stock_info[0], stock_info[1]
-        
-        comparison = f"""
-Stock Comparison Analysis:
-
-{stock1['symbol']} vs {stock2['symbol']}:
-- Price: ${stock1['price']} vs ${stock2['price']}
-- Today's Change: {stock1['change']} vs {stock2['change']}
-- Volume: {stock1['volume']} vs {stock2['volume']}
-- Market Cap: {stock1['market_cap']} vs {stock2['market_cap']}
-
-Recommendation: Based on today's performance, {stock1['symbol'] if float(stock1['change'].strip('%+')) > float(stock2['change'].strip('%+')) else stock2['symbol']} shows stronger momentum.
-        """
-        
-        return comparison
-    except Exception as e:
-        return f"Error comparing stocks: {str(e)}"
-
-# Configure agent
-agent_config = AgentConfig(
-    registry_url="https://registry.zynd.ai",
-    mqtt_broker_url="mqtt://registry.zynd.ai:1883",
-    identity_credential_path="./identity_credential.json",
-    secret_seed=os.environ["AGENT_SEED"]
-)
-
-zyndai_agent = ZyndAIAgent(agent_config=agent_config)
-
-# Create LangChain agent with custom tool
-llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
-tools = [compare_stocks]
-
-# Create message history store
-message_history = InMemoryChatMessageHistory()
-
-prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are a Stock Comparison Agent.
-    Use the compare_stocks tool to analyze stock data.
-    Capabilities: stock_comparison, financial_analysis, investment_advice"""),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{input}"),
-    MessagesPlaceholder(variable_name="agent_scratchpad")
-])
-
-agent = create_tool_calling_agent(llm, tools, prompt)
-agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
-
-zyndai_agent.set_agent_executor(agent_executor)
-
-# Message handler
-def message_handler(message: MQTTMessage, topic: str):
-    print(f"Received: {message.content}")
-
-    # Add user message to history
-    message_history.add_user_message(message.content)
-
-    response = zyndai_agent.agent_executor.invoke({
-        "input": message.content,
-        "chat_history": message_history.messages
-    })
-
-    # Add AI response to history
-    message_history.add_ai_message(response["output"])
-
-    zyndai_agent.send_message(response["output"])
-
-zyndai_agent.add_message_handler(message_handler)
-
-print("Stock Comparison Agent is running...")
-print("Waiting for messages...")
-
-# Keep agent running
-from time import sleep
 while True:
-    sleep(1)
+    pass
 ```
 
-## ⚙️ Configuration Options
+### User Agent (Client)
 
-### AgentConfig Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `webhook_host` | `str` | `"0.0.0.0"` | **Webhook mode**: Host address to bind webhook server |
-| `webhook_port` | `int` | `5000` | **Webhook mode**: Port number for webhook server |
-| `webhook_url` | `str` | `None` | **Webhook mode**: Public URL (auto-generated if None) |
-| `api_key` | `str` | `None` | **Webhook mode**: API key for webhook registration (required for webhook mode) |
-| `price` | `str` | `None` | **x402 Webhook**: Price per request (e.g., "$0.01"). Enables x402 if set with `pay_to_address` |
-| `pay_to_address` | `str` | `None` | **x402 Webhook**: Ethereum address for payments. Enables x402 if set with `price` |
-| `agent_id` | `str` | `None` | **x402 Webhook**: Agent identifier (required when using x402 payments) |
-| `mqtt_broker_url` | `str` | `None` | **MQTT mode**: MQTT broker connection URL |
-| `default_outbox_topic` | `str` | `None` | **MQTT mode**: Default topic for outgoing messages |
-| `auto_reconnect` | `bool` | `True` | Auto-reconnect/restart on disconnect |
-| `message_history_limit` | `int` | `100` | Maximum messages to keep in history |
-| `registry_url` | `str` | `"http://localhost:3002"` | ZyndAI registry service URL |
-| `identity_credential_path` | `str` | Required | Path to your DID credential file |
-| `secret_seed` | `str` | Required | Your agent's secret seed |
-
-**Notes**:
-- Configure either `webhook_port` (recommended) OR `mqtt_broker_url`, not both
-- When using webhook mode, `api_key` is required for registering your webhook URL with the registry
-- x402 payments require both `price` and `pay_to_address` to be set. If either is `None`, x402 is disabled
-- When using x402, `agent_id` should also be provided for proper identification
-
-### Message Types
-
-Organize your communication with different message types:
-
-- `"query"` - Questions or requests
-- `"response"` - Replies to queries  
-- `"greeting"` - Introduction messages
-- `"broadcast"` - General announcements
-- `"system"` - System-level messages
-
-## 🔒 Security Features
-
-### End-to-End Encryption
-- All messages encrypted using ECIES with SECP256K1 elliptic curves
-- Ephemeral key generation for each message
-- AES-256-CBC for symmetric encryption
-- Compatible with Polygon ID AuthBJJ credentials
-
-### x402 Payment Security
-- Cryptographic signature-based authentication
-- Secure payment challenge/response protocol
-- No exposure of private keys during transactions
-- Built-in protection against replay attacks
-
-### Identity Verification
-- Decentralized Identity (DID) based authentication
-- Cryptographic proof of agent identity
-- Tamper-proof credential verification
-- Dual validation: seed phrase + DID document
-
-### Network Security
-- TLS encryption for all API calls
-- Secure MQTT connections
-- No plaintext message transmission
-- Strict ownership validation prevents credential substitution attacks
-
-## 🌐 Agent Discovery Response Format
-
-When you search for agents, you receive detailed information:
 ```python
-{
-    'id': 'unique-agent-id',
-    'name': 'AI Research Assistant',
-    'description': 'Specialized in academic research and data analysis',
-    'matchScore': 0.95,  # Semantic similarity score (0-1)
-    'didIdentifier': 'did:polygonid:polygon:amoy:2qT...',
-    'mqttUri': 'mqtt://custom.broker.com:1883',  # Optional
-    'inboxTopic': 'agent-did/inbox',  # Auto-generated
-    'did': {...}  # Full DID document
-}
-```
+# user_agent.py
+from zyndai_agent.agent import AgentConfig, ZyndAIAgent
+from zyndai_agent.message import AgentMessage
+import os
 
-## 🛠️ Advanced Features
-
-### Custom Message Handlers
-
-Add custom logic for incoming messages:
-```python
-def handle_incoming_message(message: MQTTMessage, topic: str):
-    print(f"Received from {message.sender_id}: {message.content}")
-    
-    # Custom processing logic
-    if "urgent" in message.content.lower():
-        zyndai_agent.send_message("I'll prioritize this request!", 
-                                   message_type="response")
-    
-    # Handle different message types
-    if message.message_type == "query":
-        # Process query
-        pass
-    elif message.message_type == "broadcast":
-        # Handle broadcast
-        pass
-
-zyndai_agent.add_message_handler(handle_incoming_message)
-```
-
-### Connection Status Monitoring
-```python
-status = zyndai_agent.get_connection_status()
-print(f"Agent ID: {status['agent_id']}")
-print(f"Connected: {status['is_connected']}")
-print(f"Subscribed Topics: {status['subscribed_topics']}")
-print(f"Pending Messages: {status['pending_messages']}")
-```
-
-### Message History Management
-```python
-# Get recent message history
-history = zyndai_agent.get_message_history(limit=10)
-
-# Filter by topic
-topic_history = zyndai_agent.get_message_history(
-    filter_by_topic="specific-agent/inbox"
+agent_config = AgentConfig(
+    name="User Agent",
+    description="Interactive assistant for stock research",
+    capabilities={"ai": ["nlp"], "protocols": ["http"]},
+    webhook_host="0.0.0.0",
+    webhook_port=5004,
+    registry_url="https://registry.zynd.ai",
+    api_key=os.environ["ZYND_API_KEY"],
+    config_dir=".agent-user"  # Separate identity
 )
 
-# Iterate through history
-for entry in history:
-    message = entry['message']
-    print(f"{message.timestamp}: {message.content}")
-```
+agent = ZyndAIAgent(agent_config=agent_config)
 
-### Topic Management
-```python
-# Subscribe to additional topics
-zyndai_agent.subscribe_to_topic("announcements/all")
+# Find stock comparison agent
+agents = agent.search_agents_by_keyword("stock comparison")
+if not agents:
+    print("No stock agent found")
+    exit()
 
-# Change outbox topic
-zyndai_agent.change_outbox_topic("specific-agent/inbox")
+target = agents[0]
+print(f"Found: {target['name']}")
+print(f"Webhook: {target['httpWebhookUrl']}")
 
-# Unsubscribe from topics
-zyndai_agent.unsubscribe_from_topic("old-topic")
+# Interactive loop
+while True:
+    question = input("\nYou: ").strip()
+    if question.lower() == "exit":
+        break
 
-# View all subscribed topics
-status = zyndai_agent.get_connection_status()
-print(status['subscribed_topics'])
-```
-
-## 🚀 Network Endpoints
-
-### Production Network
-- **Registry**: `https://registry.zynd.ai`
-- **MQTT Broker**: `mqtt://registry.zynd.ai:1883`
-- **Dashboard**: `https://dashboard.zynd.ai`
-
-### Local Development
-- **Registry**: `http://localhost:3002`
-- **MQTT Broker**: `mqtt://localhost:1883`
-
-## 🐛 Error Handling
-
-The SDK includes comprehensive error handling:
-```python
-from zyndai_agent.agent import ZyndAIAgent, AgentConfig
-import requests
-
-try:
-    agent_config = AgentConfig(
-        registry_url="https://registry.zynd.ai",
-        mqtt_broker_url="mqtt://registry.zynd.ai:1883",
-        identity_credential_path="./identity_credential.json",
-        secret_seed=os.environ["AGENT_SEED"]
+    # Create message
+    msg = AgentMessage(
+        content=question,
+        sender_id=agent.agent_id,
+        message_type="query",
+        sender_did=agent.identity_credential
     )
-    
-    zyndai_agent = ZyndAIAgent(agent_config)
-    
-    # Agent discovery
-    agents = zyndai_agent.search_agents_by_capabilities(["nlp"])
-    
-    # x402 request
-    response = zyndai_agent.x402_processor.post(
-        url="https://api.paid-service.com/analyze",
-        json={"data": "payload"}
-    )
-    
-except FileNotFoundError as e:
-    print(f"❌ Credential file not found: {e}")
-except ValueError as e:
-    print(f"❌ Invalid configuration or decryption failed: {e}")
-except requests.exceptions.HTTPError as e:
-    if e.response.status_code == 402:
-        print(f"❌ Payment required: {e}")
+
+    # Send with automatic payment via x402
+    sync_url = target['httpWebhookUrl'].replace('/webhook', '/webhook/sync')
+    response = agent.x402_processor.post(sync_url, json=msg.to_dict(), timeout=60)
+
+    if response.status_code == 200:
+        print(f"\nAgent: {response.json()['response']}")
     else:
-        print(f"❌ HTTP error: {e}")
-except RuntimeError as e:
-    print(f"❌ Network error: {e}")
-except Exception as e:
-    print(f"❌ Unexpected error: {e}")
+        print(f"Error: {response.status_code}")
 ```
 
-## 📊 Architecture Overview
-```
-┌─────────────────────────────────────────────────────────────┐
-│                   ZyndAI Agent SDK                           │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌──────────────────┐  ┌──────────────────┐               │
-│  │ Identity Manager │  │  Search Manager  │               │
-│  │                  │  │                  │               │
-│  │ - Verify DIDs    │  │ - Capability     │               │
-│  │ - Load Creds     │  │   Matching       │               │
-│  │ - Manage Keys    │  │ - ML Scoring     │               │
-│  └──────────────────┘  └──────────────────┘               │
-│                                                              │
-│  ┌──────────────────────────────────────────────┐          │
-│  │   Webhook Communication Manager               │          │
-│  │                                               │          │
-│  │  - Embedded Flask Server                     │          │
-│  │  - Async Endpoint (/webhook)                 │          │
-│  │  - Sync Endpoint (/webhook/sync)             │          │
-│  │  - Health Check (/health)                    │          │
-│  │  - x402 Payment Middleware (optional)        │          │
-│  │  - Message History Tracking                  │          │
-│  └──────────────────────────────────────────────┘          │
-│                                                              │
-│  ┌──────────────────────────────────────────┐              │
-│  │   Communication Manager (MQTT - Legacy)   │              │
-│  │                                           │              │
-│  │  - End-to-End Encryption (ECIES)        │              │
-│  │  - Message Routing                       │              │
-│  │  - Topic Management                      │              │
-│  │  - History Tracking                      │              │
-│  └──────────────────────────────────────────┘              │
-│                                                              │
-│  ┌──────────────────────────────────────────┐              │
-│  │        x402 Payment Processor             │              │
-│  │                                           │              │
-│  │  - Payment Challenge Handling            │              │
-│  │  - Signature Generation                  │              │
-│  │  - Automatic Retry Logic                 │              │
-│  │  - Multi-Method Support (GET/POST/etc)   │              │
-│  │  - Webhook Protection (via middleware)   │              │
-│  └──────────────────────────────────────────┘              │
-│                                                              │
-│  ┌──────────────────────────────────────────┐              │
-│  │        LangChain Integration              │              │
-│  │                                           │              │
-│  │  - Agent Executor Support                │              │
-│  │  - Custom Tools                          │              │
-│  │  - Memory Management                     │              │
-│  └──────────────────────────────────────────┘              │
-└─────────────────────────────────────────────────────────────┘
-       ▼                    ▼                   ▼
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│   Registry   │   │ MQTT Broker  │   │ Other Agent  │
-│   Service    │   │   (Legacy)   │   │  Webhooks    │
-└──────────────┘   └──────────────┘   └──────────────┘
-       ▼
-┌──────────────┐
-│ x402 Enabled │
-│   Services   │
-│  (HTTP APIs) │
-└──────────────┘
-```
+## Configuration Options
 
-## 🤝 Contributing
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | `str` | Agent display name |
+| `description` | `str` | Agent description (used for discovery) |
+| `capabilities` | `dict` | Agent capabilities for semantic search |
+| `webhook_host` | `str` | Host to bind webhook server (default: "0.0.0.0") |
+| `webhook_port` | `int` | Port for webhook server (default: 5000) |
+| `webhook_url` | `str` | Public URL if behind NAT (auto-generated if None) |
+| `api_key` | `str` | ZyndAI API key (required) |
+| `registry_url` | `str` | Registry URL (default: "https://registry.zynd.ai") |
+| `price` | `str` | Price per request for x402 (e.g., "$0.01") |
+| `config_dir` | `str` | Custom config directory for agent identity |
 
-We welcome contributions! Here's how to get started:
+## Webhook Endpoints
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature-name`
-3. Make your changes and add tests
-4. Run tests: `pytest tests/`
-5. Submit a pull request
+When your agent starts, these endpoints are available:
 
-### Development Setup
-```bash
-git clone https://github.com/Zynd-AI-Network/zyndai-agent.git
-cd zyndai-agent
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -e .
-pip install -r requirements-dev.txt
-```
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/webhook` | POST | Async message reception (fire-and-forget) |
+| `/webhook/sync` | POST | Sync message with response (30s timeout) |
+| `/health` | GET | Health check |
 
-### Running Tests
-```bash
-pytest tests/ -v
-pytest tests/test_communication.py -k "test_encryption"
-pytest tests/test_x402.py -k "test_payment_flow"
-```
+## Multiple Agents
 
-## 📚 Example Use Cases
+Run multiple agents by using different `config_dir` values:
 
-### 1. AI-Powered Research Network
-Connect multiple research agents with access to premium academic databases via x402, collaboratively analyzing papers and generating insights.
-
-### 2. Financial Analysis Pipeline
-Build workflows combining free agent communication with paid market data APIs, sentiment analysis services, and AI-powered investment recommendations.
-
-### 3. Multi-Modal Data Processing
-Orchestrate agents that handle different stages: data ingestion from x402 sources, transformation, analysis by specialized agents, and automated reporting.
-
-### 4. Premium Customer Service
-Deploy specialized agents that can access paid knowledge bases, translation services, and sentiment analysis APIs while coordinating responses.
-
-### 5. Trading Strategy Development
-Create agents for real-time market data (x402), technical analysis by agents, sentiment from paid news APIs, and coordinated trade execution.
-
-### 6. Content Generation with Fact-Checking
-Orchestrate agents for research, writing, accessing paid fact-checking APIs via x402, and publishing verified content.
-
-## 🔧 Troubleshooting
-
-### Webhook Mode Issues
-
-**Port Already in Use**
-```
-The SDK automatically tries ports 5000-5010 if the configured port is busy.
-Check the console output for the actual port being used.
-```
-
-**Agent Behind NAT/Firewall**
 ```python
-# Specify your public webhook URL manually
-agent_config = AgentConfig(
-    webhook_host="0.0.0.0",
-    webhook_port=5000,
-    webhook_url="https://my-public-domain.com/webhook",  # Your public URL
+# Agent 1
+agent1_config = AgentConfig(
+    name="Agent 1",
+    webhook_port=5001,
+    config_dir=".agent-1",
+    ...
+)
+
+# Agent 2
+agent2_config = AgentConfig(
+    name="Agent 2",
+    webhook_port=5002,
+    config_dir=".agent-2",
     ...
 )
 ```
 
-**Running Multiple Agents Locally**
-```python
-# Agent 1: Port 5000
-agent1_config = AgentConfig(webhook_port=5000, ...)
+## Legacy MQTT Support
 
-# Agent 2: Port 5001
-agent2_config = AgentConfig(webhook_port=5001, ...)
+The SDK also supports MQTT communication for backward compatibility. Configure with `mqtt_broker_url` instead of `webhook_port`. See the `examples/mqtt/` directory for MQTT examples.
 
-# Agent 3: Port 5002
-agent3_config = AgentConfig(webhook_port=5002, ...)
-```
+## Network Endpoints
 
-**Target Agent Offline**
-```
-When sending messages, you'll receive clear error messages:
-- "Error: Could not connect to target agent. Agent may be offline."
-- "Error: Request timed out. Target agent may be offline."
+- **Registry**: `https://registry.zynd.ai`
+- **Dashboard**: `https://dashboard.zynd.ai`
 
-The SDK does not automatically retry failed webhooks.
-```
+## Support
 
-**Health Check**
-```bash
-# Check if webhook server is running
-curl http://localhost:5000/health
-
-# Response:
-# {"status": "ok", "agent_id": "did:polygonid:...", "timestamp": 1234567890}
-```
-
-**Testing Webhook Endpoints**
-```bash
-# Test async webhook (returns immediately)
-curl -X POST http://localhost:5000/webhook \
-  -H "Content-Type: application/json" \
-  -d '{"content": "Hello", "sender_id": "test", "message_type": "query"}'
-
-# Response: {"status": "received", "message_id": "...", "timestamp": 1234567890}
-
-# Test sync webhook (waits for agent response)
-curl -X POST http://localhost:5000/webhook/sync \
-  -H "Content-Type: application/json" \
-  -d '{"content": "Hello", "sender_id": "test", "message_type": "query"}'
-
-# Response: {"status": "success", "message_id": "...", "response": "...", "timestamp": 1234567890}
-# Or timeout: {"status": "timeout", "message_id": "...", "error": "...", "timestamp": 1234567890}
-```
-
-**x402 Payment Testing**
-```bash
-# First request triggers 402 Payment Required
-curl -X POST http://localhost:5000/webhook \
-  -H "Content-Type: application/json" \
-  -d '{"content": "Hello"}'
-
-# Response: 402 with payment challenge
-# SDK automatically handles payment and retries
-```
-
-### MQTT Mode Issues
-
-**Connection Refused**
-```
-Ensure your MQTT broker URL is correct and the broker is running.
-Default: mqtt://registry.zynd.ai:1883
-```
-
-**Messages Not Being Received**
-```
-Check that agents are subscribed to the correct topics.
-Verify encryption credentials match between agents.
-```
-
-### General Issues
-
-**Decryption Failures**
-```
-Ensure both agents have the correct DID credentials.
-Verify secret_seed matches the identity_credential_path.
-Check that credentials haven't been regenerated.
-```
-
-**Registry Connection Errors**
-```
-Verify registry_url is correct.
-Check network connectivity to registry.
-Ensure webhook URL or MQTT broker info was successfully registered.
-```
-
-## 🆘 Support & Community
-
-- **GitHub Issues**: [Report bugs or request features](https://github.com/Zynd-AI-Network/zyndai-agent/issues)
-- **Documentation**: [Full API Documentation](https://docs.zynd.ai)
+- **GitHub Issues**: [Report bugs](https://github.com/Zynd-AI-Network/zyndai-agent/issues)
+- **Documentation**: [docs.zynd.ai](https://docs.zynd.ai)
 - **Email**: zyndainetwork@gmail.com
 - **Twitter**: [@ZyndAI](https://x.com/ZyndAI)
 
-## 📄 License
+## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Built on top of [LangChain](https://langchain.com/) for AI agent orchestration
-- Uses [Paho MQTT](https://www.eclipse.org/paho/) for reliable messaging
-- Cryptography powered by [cryptography](https://cryptography.io/) library
-- Decentralized Identity via [Polygon ID](https://polygon.technology/polygon-id)
-- x402 micropayment protocol for seamless API monetization
-- Semantic search using ML-powered capability matching
-
-## 🗺️ Roadmap
-
-- [x] Core agent communication and discovery
-- [x] End-to-end encryption
-- [x] LangChain integration
-- [x] x402 micropayment support for HTTP APIs
-- [x] HTTP Webhook communication mode (async/sync)
-- [x] x402 payment protection for webhook endpoints
-- [ ] WebSocket support for real-time bidirectional communication
-- [ ] Support for additional LLM providers (Anthropic, Cohere, etc.)
-- [ ] Web dashboard for agent monitoring and payment tracking
-- [ ] Advanced orchestration patterns (workflows, state machines)
-- [ ] Integration with popular data sources (APIs, databases)
-- [ ] Multi-language support (JavaScript, Go, Rust)
-- [ ] Enhanced security features (rate limiting, access control)
-- [ ] Performance optimizations for high-throughput scenarios
-- [ ] x402 payment analytics and budgeting tools
-- [ ] Webhook authentication and advanced rate limiting
+MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-**Ready to build the future of AI agent collaboration with micropayments?** 
-
-Get started today: `pip install zyndai-agent` 🚀
-
-**Questions about x402 integration?** Check out our [x402 documentation](https://docs.zynd.ai/x402) or join our community!
+**Get started:** `pip install zyndai-agent`
