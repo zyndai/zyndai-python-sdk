@@ -7,9 +7,17 @@ from zyndai_agent.webhook_communication import WebhookCommunicationManager
 from zyndai_agent.payment import X402PaymentProcessor
 from zyndai_agent.config_manager import ConfigManager
 from pydantic import BaseModel
-from typing import Optional
-from langchain.agents import create_agent
-from langgraph.graph.state import CompiledStateGraph
+from typing import Optional, Any, Callable, Union
+from enum import Enum
+
+
+class AgentFramework(str, Enum):
+    """Supported AI agent frameworks."""
+    LANGCHAIN = "langchain"
+    LANGGRAPH = "langgraph"
+    CREWAI = "crewai"
+    PYDANTIC_AI = "pydantic_ai"
+    CUSTOM = "custom"
 
 class AgentConfig(BaseModel):
     name: str = ""
@@ -39,7 +47,9 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
 
     def __init__(self, agent_config: AgentConfig):
 
-        self.agent_executor: CompiledStateGraph = None
+        self.agent_executor: Any = None
+        self.agent_framework: AgentFramework = None
+        self.custom_invoke_fn: Callable = None
         self.agent_config = agent_config
         self.communication_mode = None  # Track which mode is active
 
@@ -102,9 +112,93 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
 
 
 
-    def set_agent_executor(self, agent_executor: CompiledStateGraph):
-        """Set the agent executor for the agent."""
-        self.agent_executor = agent_executor 
+    def set_agent_executor(self, agent_executor: Any, framework: AgentFramework = AgentFramework.LANGCHAIN):
+        """
+        Set the agent executor for the agent.
+
+        Args:
+            agent_executor: The agent executor instance (LangChain AgentExecutor, LangGraph, CrewAI Crew, etc.)
+            framework: The framework type (langchain, langgraph, crewai, pydantic_ai, custom)
+        """
+        self.agent_executor = agent_executor
+        self.agent_framework = framework
+
+    def set_langchain_agent(self, agent_executor):
+        """Set a LangChain AgentExecutor."""
+        self.agent_executor = agent_executor
+        self.agent_framework = AgentFramework.LANGCHAIN
+
+    def set_langgraph_agent(self, graph):
+        """Set a LangGraph compiled graph."""
+        self.agent_executor = graph
+        self.agent_framework = AgentFramework.LANGGRAPH
+
+    def set_crewai_agent(self, crew):
+        """Set a CrewAI Crew instance."""
+        self.agent_executor = crew
+        self.agent_framework = AgentFramework.CREWAI
+
+    def set_pydantic_ai_agent(self, agent):
+        """Set a PydanticAI Agent instance."""
+        self.agent_executor = agent
+        self.agent_framework = AgentFramework.PYDANTIC_AI
+
+    def set_custom_agent(self, invoke_fn: Callable[[str], str]):
+        """
+        Set a custom agent with a simple invoke function.
+
+        Args:
+            invoke_fn: A function that takes a string input and returns a string output
+        """
+        self.custom_invoke_fn = invoke_fn
+        self.agent_framework = AgentFramework.CUSTOM
+
+    def invoke(self, input_text: str, **kwargs) -> str:
+        """
+        Invoke the agent with the given input, regardless of framework.
+
+        Args:
+            input_text: The input text/query for the agent
+            **kwargs: Additional arguments passed to the underlying framework
+
+        Returns:
+            The agent's response as a string
+        """
+        if self.agent_framework == AgentFramework.LANGCHAIN:
+            result = self.agent_executor.invoke({"input": input_text, **kwargs})
+            return result.get("output", str(result))
+
+        elif self.agent_framework == AgentFramework.LANGGRAPH:
+            result = self.agent_executor.invoke({"messages": [("user", input_text)], **kwargs})
+            # Extract the last message content
+            if "messages" in result and len(result["messages"]) > 0:
+                last_message = result["messages"][-1]
+                if hasattr(last_message, "content"):
+                    return last_message.content
+                return str(last_message)
+            return str(result)
+
+        elif self.agent_framework == AgentFramework.CREWAI:
+            result = self.agent_executor.kickoff(inputs={"query": input_text, **kwargs})
+            # CrewAI returns a CrewOutput object
+            if hasattr(result, "raw"):
+                return result.raw
+            return str(result)
+
+        elif self.agent_framework == AgentFramework.PYDANTIC_AI:
+            # PydanticAI uses run_sync for synchronous execution
+            result = self.agent_executor.run_sync(input_text, **kwargs)
+            if hasattr(result, "data"):
+                return str(result.data)
+            return str(result)
+
+        elif self.agent_framework == AgentFramework.CUSTOM:
+            if self.custom_invoke_fn:
+                return self.custom_invoke_fn(input_text)
+            raise ValueError("Custom agent invoke function not set")
+
+        else:
+            raise ValueError(f"Unknown agent framework: {self.agent_framework}") 
 
     def update_agent_mqtt_info(self):
         """Updates the mqtt connection info of the agent into the registry so other agents can find me"""
