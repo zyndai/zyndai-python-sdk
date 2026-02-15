@@ -8,8 +8,11 @@ from zyndai_agent.payment import X402PaymentProcessor
 from zyndai_agent.config_manager import ConfigManager
 from pydantic import BaseModel
 from typing import Optional
-from langchain.agents import create_agent
-from langgraph.graph.state import CompiledStateGraph
+
+try:
+    from langgraph.graph.state import CompiledStateGraph
+except ImportError:
+    CompiledStateGraph = None
 
 class AgentConfig(BaseModel):
     name: str = ""

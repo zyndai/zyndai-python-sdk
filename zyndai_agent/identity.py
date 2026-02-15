@@ -105,8 +105,7 @@ class IdentityManager:
         """
         if not self.AGENT_DID:
             raise ValueError("No DID available for this agent")
-        print(self.AGENT_DID)
-        return ""
+        return self.AGENT_DID
 
     def load_did(self, cred_path: str) -> None:
         

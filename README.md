@@ -21,7 +21,7 @@ Or install from source:
 ```bash
 git clone https://github.com/Zynd-AI-Network/zyndai-agent.git
 cd zyndai-agent
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ## Quick Start

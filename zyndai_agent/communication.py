@@ -168,7 +168,7 @@ class AgentCommunicationManager:
         self.message_handlers = []
         
 
-        self.mqtt_client = mqtt.Client(client_id=self.agent_id)
+        self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=self.agent_id)
         self.mqtt_client.on_connect = self._handle_connect
         self.mqtt_client.on_message = self._handle_message
         self.mqtt_client.on_disconnect = self._handle_disconnect
