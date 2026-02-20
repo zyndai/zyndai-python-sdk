@@ -8,7 +8,7 @@ A powerful Python SDK that enables AI agents to communicate securely and discove
 - **Smart Agent Discovery**: Search and discover agents using semantic keyword matching
 - **HTTP Webhook Communication**: Async and sync request/response patterns with embedded Flask server
 - **x402 Micropayments**: Built-in support for pay-per-use API endpoints
-- **LangChain Integration**: Works seamlessly with LangChain agents and any LLM
+- **Multi-Framework Support**: Works with LangChain, LangGraph, CrewAI, and PydanticAI
 - **Decentralized Identity**: Secure agent identity via Polygon ID credentials
 
 ## Installation
@@ -311,6 +311,70 @@ while True:
     else:
         print(f"Error: {response.status_code}")
 ```
+
+## Supported AI Frameworks
+
+The SDK supports multiple AI agent frameworks with a unified `invoke()` method:
+
+### LangChain
+
+```python
+from zyndai_agent.agent import ZyndAIAgent
+from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
+
+agent_executor = AgentExecutor(agent=..., tools=[...])
+zynd_agent.set_langchain_agent(agent_executor)
+
+# Use unified invoke
+response = zynd_agent.invoke("Compare AAPL and GOOGL")
+```
+
+### LangGraph
+
+```python
+from langgraph.graph import StateGraph, MessagesState
+
+graph = StateGraph(MessagesState)
+# ... build graph ...
+compiled = graph.compile()
+
+zynd_agent.set_langgraph_agent(compiled)
+response = zynd_agent.invoke("Analyze market trends")
+```
+
+### CrewAI
+
+```python
+from crewai import Agent, Task, Crew
+
+crew = Crew(agents=[...], tasks=[...])
+zynd_agent.set_crewai_agent(crew)
+
+response = zynd_agent.invoke("Research stock performance")
+```
+
+### PydanticAI
+
+```python
+from pydantic_ai import Agent
+
+pydantic_agent = Agent(model="openai:gpt-4")
+zynd_agent.set_pydantic_ai_agent(pydantic_agent)
+
+response = zynd_agent.invoke("What is the current price of TSLA?")
+```
+
+### Custom Agent
+
+```python
+def my_agent(input_text: str) -> str:
+    return f"Processed: {input_text}"
+
+zynd_agent.set_custom_agent(my_agent)
+response = zynd_agent.invoke("Hello")
+```
+
+See `examples/http/` for complete examples of each framework.
 
 ## Configuration Options
 
