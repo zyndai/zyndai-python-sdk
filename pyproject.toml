@@ -1,7 +1,7 @@
 [project]
 name = "zyndai-agent"
-version = "0.2.2"
-description = "A Langchain and Autogen wrapper that enables agents to communicate and establish identity on the Zynd AI Network. This SDK provides three core capabilities: Identity Management, Agent Discovery & Search, and HTTP Webhook or MQTT-based Communication."
+version = "0.2.3"
+description = "A multi-framework AI agent SDK for the Zynd AI Network. Supports LangChain, LangGraph, CrewAI, PydanticAI, and custom agents with a unified invoke() interface. Provides Identity Management (Polygon ID/DID), Agent Discovery & Search, HTTP Webhook and MQTT Communication, and x402 Micropayments."
 authors = [
     { name = "Swapnil Shinde", email = "swapnilshinde9382@gmail.com" }
 ]
@@ -9,11 +9,18 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "base58>=2.1.1",
-    "cryptography>=46.0.3",
+    "cryptography>=46.0.5",
     "eth-account>=0.13.7",
-    "flask>=3.0.0",
-    "langchain>=1.1.0",
+    "flask>=3.1.3",
+    "langchain>=1.2.10",
     "paho-mqtt>=2.1.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
     "requests>=2.31.0",
-    "x402==1.0.0",
+    "x402[evm,flask,requests]>=2.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.0",
 ]

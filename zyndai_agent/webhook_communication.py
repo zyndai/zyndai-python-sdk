@@ -6,12 +6,14 @@ from flask import Flask, request, jsonify
 from typing import List, Callable, Optional, Dict, Any
 from zyndai_agent.message import AgentMessage
 from zyndai_agent.search import AgentSearchResponse
-from x402.flask.middleware import PaymentMiddleware
+from x402 import x402ResourceServerSync
+from x402.http.middleware.flask import PaymentMiddleware
+from x402.http.types import RouteConfig, PaymentOption
+from x402.mechanisms.evm.exact import register_exact_evm_server
 
 # Configure logging with a more descriptive format
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("WebhookAgentCommunication")
 
@@ -37,7 +39,7 @@ class WebhookCommunicationManager:
         message_history_limit: int = 100,
         identity_credential: dict = None,
         price: Optional[str] = "$0.01",
-        pay_to_address: Optional[str] = None
+        pay_to_address: Optional[str] = None,
     ):
         """
         Initialize the webhook agent communication manager.
@@ -76,13 +78,39 @@ class WebhookCommunicationManager:
         self.flask_app = Flask(f"agent_{agent_id}")
         self.flask_app.logger.setLevel(logging.ERROR)  # Suppress Flask logging
 
-        if price != None and pay_to_address != None:
-            self.payment_middleware = PaymentMiddleware(self.flask_app)
-            self.payment_middleware.add(
-                price,
-                pay_to_address,
-                path="/webhook"
-            )
+        if price is not None and pay_to_address is not None:
+            try:
+                # x402 v2 API: create a resource server with route config
+                server = x402ResourceServerSync()
+                register_exact_evm_server(server)
+
+                routes = {
+                    "POST /webhook": RouteConfig(
+                        accepts=PaymentOption(
+                            scheme="exact",
+                            network="base-sepolia",
+                            pay_to=pay_to_address,
+                            price=price,
+                            max_timeout_seconds=300,
+                        )
+                    ),
+                    "POST /webhook/sync": RouteConfig(
+                        accepts=PaymentOption(
+                            scheme="exact",
+                            network="base-sepolia",
+                            pay_to=pay_to_address,
+                            price=price,
+                            max_timeout_seconds=300,
+                        )
+                    ),
+                }
+
+                self.payment_middleware = PaymentMiddleware(
+                    self.flask_app, routes, server, sync_facilitator_on_start=True
+                )
+            except Exception as e:
+                logger.warning(f"Failed to initialize x402 payment middleware: {e}")
+                print(f"x402 payment middleware disabled: {e}")
         else:
             print("Disabling x402, X402 payment config not provided")
 
@@ -97,21 +125,19 @@ class WebhookCommunicationManager:
     def _setup_routes(self):
         """Setup Flask routes for webhook endpoints."""
 
-        @self.flask_app.route('/webhook', methods=['POST'])
+        @self.flask_app.route("/webhook", methods=["POST"])
         def webhook_handler():
             return self._handle_webhook_request(sync=False)
 
-        @self.flask_app.route('/webhook/sync', methods=['POST'])
+        @self.flask_app.route("/webhook/sync", methods=["POST"])
         def webhook_sync_handler():
             return self._handle_webhook_request(sync=True)
 
-        @self.flask_app.route('/health', methods=['GET'])
+        @self.flask_app.route("/health", methods=["GET"])
         def health_check():
-            return jsonify({
-                "status": "ok",
-                "agent_id": self.agent_id,
-                "timestamp": time.time()
-            }), 200
+            return jsonify(
+                {"status": "ok", "agent_id": self.agent_id, "timestamp": time.time()}
+            ), 200
 
     def _handle_webhook_request(self, sync=False):
         """Handle incoming webhook POST requests."""
@@ -137,7 +163,7 @@ class WebhookCommunicationManager:
                 "message": message,
                 "received_at": time.time(),
                 "structured": True,
-                "source_ip": request.remote_addr
+                "source_ip": request.remote_addr,
             }
 
             print("\nIncoming Message: ", message.content, "\n")
@@ -148,7 +174,9 @@ class WebhookCommunicationManager:
 
                 # Maintain history limit
                 if len(self.message_history) > self.message_history_limit:
-                    self.message_history = self.message_history[-self.message_history_limit:]
+                    self.message_history = self.message_history[
+                        -self.message_history_limit :
+                    ]
 
             # Check if synchronous response is requested
             if sync:
@@ -167,21 +195,25 @@ class WebhookCommunicationManager:
                     with self._lock:
                         if message.message_id in self.pending_responses:
                             response = self.pending_responses.pop(message.message_id)
-                            return jsonify({
-                                "status": "success",
-                                "message_id": message.message_id,
-                                "response": response,
-                                "timestamp": time.time()
-                            }), 200
+                            return jsonify(
+                                {
+                                    "status": "success",
+                                    "message_id": message.message_id,
+                                    "response": response,
+                                    "timestamp": time.time(),
+                                }
+                            ), 200
                     time.sleep(0.1)  # Small delay to avoid busy waiting
 
                 # Timeout - no response received
-                return jsonify({
-                    "status": "timeout",
-                    "message_id": message.message_id,
-                    "error": "Agent did not respond within timeout period",
-                    "timestamp": time.time()
-                }), 408
+                return jsonify(
+                    {
+                        "status": "timeout",
+                        "message_id": message.message_id,
+                        "error": "Agent did not respond within timeout period",
+                        "timestamp": time.time(),
+                    }
+                ), 408
             else:
                 # Async mode - invoke handlers and return immediately
                 for handler in self.message_handlers:
@@ -191,11 +223,13 @@ class WebhookCommunicationManager:
                         logger.error(f"Error in message handler: {e}")
 
                 # Return success
-                return jsonify({
-                    "status": "received",
-                    "message_id": message.message_id,
-                    "timestamp": time.time()
-                }), 200
+                return jsonify(
+                    {
+                        "status": "received",
+                        "message_id": message.message_id,
+                        "timestamp": time.time(),
+                    }
+                ), 200
 
         except Exception as e:
             logger.error(f"Error handling webhook request: {e}")
@@ -221,13 +255,11 @@ class WebhookCommunicationManager:
                         port=port,
                         debug=False,
                         use_reloader=False,
-                        threaded=True
+                        threaded=True,
                     )
 
                 self.flask_thread = threading.Thread(
-                    target=run_flask,
-                    daemon=True,
-                    name=f"WebhookServer-{self.agent_id}"
+                    target=run_flask, daemon=True, name=f"WebhookServer-{self.agent_id}"
                 )
                 self.flask_thread.start()
 
@@ -236,7 +268,11 @@ class WebhookCommunicationManager:
 
                 # Auto-form webhook URL from host and port
                 if self.webhook_url is None:
-                    host = "localhost" if self.webhook_host == "0.0.0.0" else self.webhook_host
+                    host = (
+                        "localhost"
+                        if self.webhook_host == "0.0.0.0"
+                        else self.webhook_host
+                    )
                     scheme = "https" if port == 443 else "http"
                     self.webhook_url = f"{scheme}://{host}:{port}/webhook"
 
@@ -273,7 +309,7 @@ class WebhookCommunicationManager:
         self,
         message_content: str,
         message_type: str = "query",
-        receiver_id: Optional[str] = None
+        receiver_id: Optional[str] = None,
     ) -> str:
         """
         Send a message to another agent via HTTP POST.
@@ -299,7 +335,7 @@ class WebhookCommunicationManager:
                 sender_id=self.agent_id,
                 receiver_id=receiver_id,
                 message_type=message_type,
-                sender_did=self.identity_credential
+                sender_did=self.identity_credential,
             )
 
             # Convert to dict for JSON serialization
@@ -311,7 +347,7 @@ class WebhookCommunicationManager:
                 self.target_webhook_url,
                 json=json_payload,
                 headers={"Content-Type": "application/json"},
-                timeout=30  # 30 second timeout
+                timeout=30,  # 30 second timeout
             )
 
             # Check response
@@ -320,15 +356,19 @@ class WebhookCommunicationManager:
 
                 # Add to history
                 with self._lock:
-                    self.message_history.append({
-                        "message": message,
-                        "sent_at": time.time(),
-                        "direction": "outgoing",
-                        "target_url": self.target_webhook_url
-                    })
+                    self.message_history.append(
+                        {
+                            "message": message,
+                            "sent_at": time.time(),
+                            "direction": "outgoing",
+                            "target_url": self.target_webhook_url,
+                        }
+                    )
 
                     if len(self.message_history) > self.message_history_limit:
-                        self.message_history = self.message_history[-self.message_history_limit:]
+                        self.message_history = self.message_history[
+                            -self.message_history_limit :
+                        ]
 
                 return f"Message sent successfully to topic '{self.target_webhook_url}'"
             else:
@@ -341,7 +381,9 @@ class WebhookCommunicationManager:
             logger.error(error_msg)
             return error_msg
         except requests.exceptions.ConnectionError:
-            error_msg = "Error: Could not connect to target agent. Agent may be offline."
+            error_msg = (
+                "Error: Could not connect to target agent. Agent may be offline."
+            )
             logger.error(error_msg)
             return error_msg
         except Exception as e:
@@ -425,13 +467,11 @@ class WebhookCommunicationManager:
             "webhook_port": self.webhook_port,
             "target_webhook_url": self.target_webhook_url,
             "pending_messages": len(self.received_messages),
-            "message_history_count": len(self.message_history)
+            "message_history_count": len(self.message_history),
         }
 
     def get_message_history(
-        self,
-        limit: int = None,
-        filter_by_topic: str = None
+        self, limit: int = None, filter_by_topic: str = None
     ) -> List[Dict[str, Any]]:
         """
         Get the message history with optional filtering.
@@ -462,9 +502,13 @@ class WebhookCommunicationManager:
         # Support both old 'webhookUrl' and new 'httpWebhookUrl' field names
         webhook_url = agent.get("httpWebhookUrl") or agent.get("webhookUrl")
         if not webhook_url:
-            raise ValueError("Agent does not have httpWebhookUrl. Cannot connect via webhook.")
+            raise ValueError(
+                "Agent does not have httpWebhookUrl. Cannot connect via webhook."
+            )
 
         self.target_webhook_url = webhook_url
         self.is_agent_connected = True
 
-        logger.info(f"Connected to agent {agent.get('didIdentifier', 'unknown')} at {self.target_webhook_url}")
+        logger.info(
+            f"Connected to agent {agent.get('didIdentifier', 'unknown')} at {self.target_webhook_url}"
+        )
