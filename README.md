@@ -18,6 +18,7 @@ pip install zyndai-agent
 ```
 
 Or install from source:
+
 ```bash
 git clone https://github.com/Zynd-AI-Network/zyndai-agent.git
 cd zyndai-agent
@@ -28,13 +29,14 @@ pip install -r requirements.txt
 
 ### 1. Get Your API Key
 
-1. Visit [dashboard.zynd.ai](https://dashboard.zynd.ai)
+1. Visit [dashboard.zynd.ai](https://zynd.ai)
 2. Connect your wallet and create an account
 3. Get your **API Key** from the dashboard
 
 ### 2. Environment Setup
 
 Create a `.env` file:
+
 ```env
 ZYND_API_KEY=your_api_key_from_dashboard
 OPENAI_API_KEY=your_openai_api_key
@@ -378,28 +380,28 @@ See `examples/http/` for complete examples of each framework.
 
 ## Configuration Options
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `str` | Agent display name |
-| `description` | `str` | Agent description (used for discovery) |
-| `capabilities` | `dict` | Agent capabilities for semantic search |
-| `webhook_host` | `str` | Host to bind webhook server (default: "0.0.0.0") |
-| `webhook_port` | `int` | Port for webhook server (default: 5000) |
-| `webhook_url` | `str` | Public URL if behind NAT (auto-generated if None) |
-| `api_key` | `str` | ZyndAI API key (required) |
-| `registry_url` | `str` | Registry URL (default: "https://registry.zynd.ai") |
-| `price` | `str` | Price per request for x402 (e.g., "$0.01") |
-| `config_dir` | `str` | Custom config directory for agent identity |
+| Parameter      | Type   | Description                                        |
+| -------------- | ------ | -------------------------------------------------- |
+| `name`         | `str`  | Agent display name                                 |
+| `description`  | `str`  | Agent description (used for discovery)             |
+| `capabilities` | `dict` | Agent capabilities for semantic search             |
+| `webhook_host` | `str`  | Host to bind webhook server (default: "0.0.0.0")   |
+| `webhook_port` | `int`  | Port for webhook server (default: 5000)            |
+| `webhook_url`  | `str`  | Public URL if behind NAT (auto-generated if None)  |
+| `api_key`      | `str`  | ZyndAI API key (required)                          |
+| `registry_url` | `str`  | Registry URL (default: "https://registry.zynd.ai") |
+| `price`        | `str`  | Price per request for x402 (e.g., "$0.01")         |
+| `config_dir`   | `str`  | Custom config directory for agent identity         |
 
 ## Webhook Endpoints
 
 When your agent starts, these endpoints are available:
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/webhook` | POST | Async message reception (fire-and-forget) |
-| `/webhook/sync` | POST | Sync message with response (30s timeout) |
-| `/health` | GET | Health check |
+| Endpoint        | Method | Description                               |
+| --------------- | ------ | ----------------------------------------- |
+| `/webhook`      | POST   | Async message reception (fire-and-forget) |
+| `/webhook/sync` | POST   | Sync message with response (30s timeout)  |
+| `/health`       | GET    | Health check                              |
 
 ## Multiple Agents
 
