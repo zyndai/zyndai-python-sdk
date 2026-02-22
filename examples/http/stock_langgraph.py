@@ -10,6 +10,19 @@ Features:
 - Explicit state management
 - Tool calling with search capabilities
 - x402 micropayments (0.0001 USDC per request)
+- Ngrok tunnel support for public access
+
+Running multiple agents on the same machine:
+    # Terminal 1 - LangGraph agent on port 5010
+    python examples/http/stock_langgraph.py
+
+    # Terminal 2 - LangChain agent on port 5003
+    python examples/http/stock_langchain.py
+
+    # Terminal 3 - User agent on port 5004
+    python examples/http/user_agent.py
+
+    Each agent gets its own ngrok tunnel and public URL automatically.
 """
 
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent, AgentFramework
@@ -57,7 +70,7 @@ When comparing stocks:
 3. Summarize recent news and market sentiment
 4. Give a balanced analysis without providing financial advice
 
-Always be professional and note this is for informational purposes only."""
+Always be professional and note this is for informational purposes only.""",
         }
 
         messages = [system_message] + state["messages"]
@@ -81,24 +94,29 @@ Always be professional and note this is for informational purposes only."""
 
 
 if __name__ == "__main__":
-
-    # Create agent config with x402 payment
+    # Create agent config with x402 payment and ngrok tunnel
     agent_config = AgentConfig(
         name="Stock Agent (LangGraph)",
         description="A stock comparison agent built with LangGraph. "
-                    "Provides financial analysis using graph-based AI architecture.",
+        "Provides financial analysis using graph-based AI architecture.",
         capabilities={
             "ai": ["nlp", "financial_analysis", "langgraph"],
             "protocols": ["http"],
             "services": ["stock_comparison", "market_research"],
-            "domains": ["finance", "stocks"]
+            "domains": ["finance", "stocks"],
         },
         webhook_host="0.0.0.0",
         webhook_port=5010,
         registry_url="https://registry.zynd.ai",
         price="$0.0001",
         api_key=os.environ["ZYND_API_KEY"],
-        config_dir=".agent-langgraph"
+        config_dir=".agent-langgraph",
+        # Enable ngrok to expose this agent publicly (requires: pip install zyndai-agent[ngrok])
+        # Each agent on a different port gets its own ngrok tunnel URL
+        use_ngrok=True,
+        ngrok_auth_token=os.environ.get(
+            "NGROK_AUTH_TOKEN"
+        ),  # Or set globally via: ngrok config add-authtoken <token>
     )
 
     # Initialize ZyndAI agent
@@ -112,9 +130,9 @@ if __name__ == "__main__":
     def message_handler(message: AgentMessage, topic: str):
         import traceback
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"[LangGraph] Received: {message.content}")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         try:
             # Use the unified invoke method
@@ -130,12 +148,12 @@ if __name__ == "__main__":
     zynd_agent.add_message_handler(message_handler)
 
     # Keep running
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Stock Agent (LangGraph) is running")
     print(f"Framework: LangGraph")
     print(f"Price: 0.0001 USDC per request")
     print(f"Webhook: {zynd_agent.webhook_url}")
-    print("="*60)
+    print("=" * 60)
     print("\nType 'exit' to quit\n")
 
     while True:

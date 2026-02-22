@@ -473,7 +473,7 @@ When your agent starts, these endpoints are available:
 
 ## Multiple Agents
 
-Run multiple agents by using different `config_dir` values:
+Run multiple agents by using different `config_dir` values and ports:
 
 ```python
 # Agent 1
@@ -492,6 +492,77 @@ agent2_config = AgentConfig(
     ...
 )
 ```
+
+### Running Multiple Agents with Ngrok on the Same Machine
+
+You can run 3 (or more) agents on the same PC, each on a different port, each with its own ngrok tunnel. The SDK handles this automatically -- just set `use_ngrok=True` on each agent:
+
+```bash
+# Install with ngrok support
+pip install zyndai-agent[ngrok]
+```
+
+```bash
+# Add your ngrok auth token to .env
+NGROK_AUTH_TOKEN=your-ngrok-auth-token
+```
+
+```python
+# agent_1.py - LangChain stock agent on port 5003
+agent1_config = AgentConfig(
+    name="Stock Agent (LangChain)",
+    webhook_port=5003,
+    config_dir=".agent-langchain",
+    use_ngrok=True,
+    ngrok_auth_token=os.environ.get("NGROK_AUTH_TOKEN"),
+    api_key=os.environ["ZYND_API_KEY"],
+    ...
+)
+# Output: Ngrok tunnel active: https://abc123.ngrok-free.app -> localhost:5003
+
+# agent_2.py - CrewAI stock agent on port 5011
+agent2_config = AgentConfig(
+    name="Stock Agent (CrewAI)",
+    webhook_port=5011,
+    config_dir=".agent-crewai",
+    use_ngrok=True,
+    ngrok_auth_token=os.environ.get("NGROK_AUTH_TOKEN"),
+    api_key=os.environ["ZYND_API_KEY"],
+    ...
+)
+# Output: Ngrok tunnel active: https://def456.ngrok-free.app -> localhost:5011
+
+# agent_3.py - User agent on port 5004
+agent3_config = AgentConfig(
+    name="User Agent",
+    webhook_port=5004,
+    config_dir=".agent-user",
+    use_ngrok=True,
+    ngrok_auth_token=os.environ.get("NGROK_AUTH_TOKEN"),
+    api_key=os.environ["ZYND_API_KEY"],
+    ...
+)
+# Output: Ngrok tunnel active: https://ghi789.ngrok-free.app -> localhost:5004
+```
+
+Run each agent in a separate terminal:
+
+```bash
+# Terminal 1
+python examples/http/stock_langchain.py
+
+# Terminal 2
+python examples/http/stock_crewai.py
+
+# Terminal 3
+python examples/http/user_agent.py
+```
+
+Each agent gets its own public ngrok URL that is automatically registered with the ZyndAI registry. Other agents can discover and reach them from anywhere on the internet.
+
+> **Note:** The free ngrok plan only allows **1 tunnel at a time**. To run multiple agents with ngrok simultaneously, you need a **paid ngrok plan** or use an alternative like [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) which supports multiple free tunnels.
+
+See `examples/http/` for complete working examples with ngrok pre-configured.
 
 ## Legacy MQTT Support
 

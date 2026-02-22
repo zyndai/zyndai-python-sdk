@@ -8,9 +8,22 @@ This agent:
 - Ranks and selects the best matching agent for each query
 - Automatically retries with other agents if one fails
 - Automatically pays the required fee via x402 protocol
+- Supports ngrok tunnel for public access
 
 The agent dynamically determines search terms based on user queries,
 rather than using hardcoded search terms.
+
+Running multiple agents on the same machine:
+    # Terminal 1 - User agent on port 5004
+    python examples/http/user_agent.py
+
+    # Terminal 2 - LangChain stock agent on port 5003
+    python examples/http/stock_langchain.py
+
+    # Terminal 3 - CrewAI stock agent on port 5011
+    python examples/http/stock_crewai.py
+
+    Each agent gets its own ngrok tunnel and public URL automatically.
 """
 
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
@@ -32,9 +45,14 @@ load_dotenv()
 
 class SearchTerms(BaseModel):
     """Extracted search terms from user query."""
+
     keyword: str = Field(description="Primary keyword for semantic search")
-    capabilities: List[str] = Field(description="List of capability terms to search for")
-    domain: str = Field(description="The domain/category of the query (e.g., finance, weather, code)")
+    capabilities: List[str] = Field(
+        description="List of capability terms to search for"
+    )
+    domain: str = Field(
+        description="The domain/category of the query (e.g., finance, weather, code)"
+    )
 
 
 class AgentDiscoveryClient:
@@ -62,8 +80,11 @@ class AgentDiscoveryClient:
 
     def _create_search_extractor(self):
         """Create a chain to extract search terms from user queries."""
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert at analyzing user queries and extracting search terms
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """You are an expert at analyzing user queries and extracting search terms
 to find the right AI agent to handle the request.
 
 Given a user query, extract:
@@ -73,17 +94,22 @@ Given a user query, extract:
 
 Think about what skills and expertise an agent would need to answer this query.
 
-Respond with valid JSON only."""),
-            ("human", "Query: {query}")
-        ])
+Respond with valid JSON only.""",
+                ),
+                ("human", "Query: {query}"),
+            ]
+        )
 
         parser = JsonOutputParser(pydantic_object=SearchTerms)
         return prompt | self.llm | parser
 
     def _create_agent_ranker(self):
         """Create a chain to rank agents based on relevance to the query."""
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert at matching user queries to AI agents.
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """You are an expert at matching user queries to AI agents.
 
 Given a user query and a list of available agents, rank them by relevance.
 Consider the agent's name, description, and capabilities.
@@ -96,12 +122,17 @@ Return a JSON object with:
 
 If no agents seem relevant, set confidence to 0.
 
-Respond with valid JSON only."""),
-            ("human", """Query: {query}
+Respond with valid JSON only.""",
+                ),
+                (
+                    "human",
+                    """Query: {query}
 
 Available agents:
-{agents_info}""")
-        ])
+{agents_info}""",
+                ),
+            ]
+        )
 
         return prompt | self.llm
 
@@ -121,7 +152,7 @@ Available agents:
             return {
                 "keyword": query[:50],
                 "capabilities": [query[:30]],
-                "domain": "general"
+                "domain": "general",
             }
 
     def search_for_agents(self, query: str) -> List[dict]:
@@ -139,8 +170,7 @@ Available agents:
         # Step 2: First try keyword search
         print(f"\nSearching registry with keyword: '{search_terms['keyword']}'...")
         agents = self.zynd_agent.search_agents_by_keyword(
-            keyword=search_terms["keyword"],
-            limit=10
+            keyword=search_terms["keyword"], limit=10
         )
 
         # Step 3: If keyword search returned no results, try capabilities search
@@ -148,8 +178,7 @@ Available agents:
             print(f"No results from keyword search. Trying capabilities search...")
             print(f"Searching by capabilities: {search_terms['capabilities']}...")
             agents = self.zynd_agent.search_agents_by_capabilities(
-                capabilities=search_terms["capabilities"],
-                top_k=10
+                capabilities=search_terms["capabilities"], top_k=10
             )
 
         if not agents:
@@ -179,26 +208,25 @@ Available agents:
             agents_info += f"\n[{i}] {agent.get('name', 'Unknown')}"
             agents_info += f"\n    Description: {agent.get('description', 'N/A')[:150]}"
             agents_info += f"\n    Status: {agent.get('status', 'UNKNOWN')}"
-            if agent.get('capabilities'):
-                caps = agent.get('capabilities', {})
+            if agent.get("capabilities"):
+                caps = agent.get("capabilities", {})
                 agents_info += f"\n    Capabilities: {json.dumps(caps)[:100]}"
             agents_info += "\n"
 
         print("\nRanking agents by relevance to your query...")
 
         try:
-            result = self.agent_ranker.invoke({
-                "query": query,
-                "agents_info": agents_info
-            })
+            result = self.agent_ranker.invoke(
+                {"query": query, "agents_info": agents_info}
+            )
 
             # Parse the ranking result
-            ranking_text = result.content if hasattr(result, 'content') else str(result)
+            ranking_text = result.content if hasattr(result, "content") else str(result)
 
             # Try to extract JSON from the response
             try:
-                start = ranking_text.find('{')
-                end = ranking_text.rfind('}') + 1
+                start = ranking_text.find("{")
+                end = ranking_text.rfind("}") + 1
                 if start >= 0 and end > start:
                     ranking_data = json.loads(ranking_text[start:end])
                 else:
@@ -206,9 +234,9 @@ Available agents:
             except json.JSONDecodeError:
                 ranking_data = {}
 
-            rankings = ranking_data.get('rankings', list(range(len(agents))))
-            confidence = ranking_data.get('confidence', 50)
-            reasoning = ranking_data.get('reasoning', 'Ranked by relevance')
+            rankings = ranking_data.get("rankings", list(range(len(agents))))
+            confidence = ranking_data.get("confidence", 50)
+            reasoning = ranking_data.get("reasoning", "Ranked by relevance")
 
             # Reorder agents based on rankings
             ranked_agents = []
@@ -222,10 +250,14 @@ Available agents:
                     ranked_agents.append(agent)
 
             if ranked_agents:
-                print(f"\nBest match: {ranked_agents[0].get('name', 'Unknown')} (confidence: {confidence}%)")
+                print(
+                    f"\nBest match: {ranked_agents[0].get('name', 'Unknown')} (confidence: {confidence}%)"
+                )
                 print(f"Reason: {reasoning}")
                 if len(ranked_agents) > 1:
-                    print(f"Backup agents: {', '.join([a.get('name', 'Unknown') for a in ranked_agents[1:3]])}")
+                    print(
+                        f"Backup agents: {', '.join([a.get('name', 'Unknown') for a in ranked_agents[1:3]])}"
+                    )
 
             return ranked_agents
 
@@ -235,7 +267,7 @@ Available agents:
 
     def connect_to_agent(self, agent: dict) -> bool:
         """Connect to a specific agent."""
-        if not agent.get('httpWebhookUrl'):
+        if not agent.get("httpWebhookUrl"):
             print(f"Agent {agent.get('name', 'Unknown')} has no webhook URL.")
             return False
 
@@ -250,26 +282,26 @@ Available agents:
         Try to ask a question to a specific agent.
         Returns (success, response_or_error).
         """
-        webhook_url = agent.get('httpWebhookUrl')
+        webhook_url = agent.get("httpWebhookUrl")
         if not webhook_url:
             return False, "No webhook URL"
 
-        sync_url = webhook_url.replace('/webhook', '/webhook/sync')
+        sync_url = webhook_url.replace("/webhook", "/webhook/sync")
 
         try:
             message = AgentMessage(
                 content=question,
                 sender_id=self.zynd_agent.agent_id,
-                receiver_id=agent.get('didIdentifier'),
+                receiver_id=agent.get("didIdentifier"),
                 message_type="query",
-                sender_did=self.zynd_agent.identity_credential
+                sender_did=self.zynd_agent.identity_credential,
             )
 
             response = self.payment_processor.post(
                 sync_url,
                 json=message.to_dict(),
                 headers={"Content-Type": "application/json"},
-                timeout=60
+                timeout=60,
             )
 
             if response.status_code == 200:
@@ -277,7 +309,7 @@ Available agents:
                 payment_response = response.headers.get("x-payment-response")
                 if payment_response:
                     print(f"Payment processed: {payment_response}")
-                return True, result.get('response', 'No response content')
+                return True, result.get("response", "No response content")
             else:
                 return False, f"HTTP {response.status_code}"
 
@@ -298,9 +330,9 @@ Available agents:
         # Start from current index
         for i in range(self.current_agent_index, len(self.ranked_agents)):
             agent = self.ranked_agents[i]
-            agent_name = agent.get('name', 'Unknown')
+            agent_name = agent.get("name", "Unknown")
 
-            print(f"\nTrying agent {i+1}/{len(self.ranked_agents)}: {agent_name}...")
+            print(f"\nTrying agent {i + 1}/{len(self.ranked_agents)}: {agent_name}...")
 
             # Connect to this agent
             if not self.connect_to_agent(agent):
@@ -363,12 +395,11 @@ Available agents:
 
 
 if __name__ == "__main__":
-
-    # Create agent config for the user agent
+    # Create agent config for the user agent with ngrok tunnel
     agent_config = AgentConfig(
         name="Intelligent User Agent",
         description="An intelligent user assistant that dynamically discovers "
-                    "and communicates with specialized agents based on user queries.",
+        "and communicates with specialized agents based on user queries.",
         capabilities={
             "ai": ["nlp", "conversational_ai", "agent_discovery"],
             "protocols": ["http"],
@@ -376,12 +407,9 @@ if __name__ == "__main__":
                 "user_assistance",
                 "agent_orchestration",
                 "query_routing",
-                "intelligent_search"
+                "intelligent_search",
             ],
-            "domains": [
-                "general_assistance",
-                "multi_domain"
-            ]
+            "domains": ["general_assistance", "multi_domain"],
         },
         webhook_host="0.0.0.0",
         webhook_port=5004,
@@ -389,7 +417,13 @@ if __name__ == "__main__":
         message_history_limit=100,
         registry_url="https://registry.zynd.ai",
         api_key=os.environ["ZYND_API_KEY"],
-        config_dir=".agent-user"
+        config_dir=".agent-user",
+        # Enable ngrok to expose this agent publicly (requires: pip install zyndai-agent[ngrok])
+        # Each agent on a different port gets its own ngrok tunnel URL
+        use_ngrok=True,
+        ngrok_auth_token=os.environ.get(
+            "NGROK_AUTH_TOKEN"
+        ),  # Or set globally via: ngrok config add-authtoken <token>
     )
 
     # Initialize ZyndAI agent
@@ -399,21 +433,21 @@ if __name__ == "__main__":
     client = AgentDiscoveryClient(zynd_agent)
 
     # Main interactive loop
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Intelligent User Agent")
-    print("="*60)
+    print("=" * 60)
     print("\nThis agent will analyze your questions and automatically")
     print("find the best specialized agent to handle them.")
     print("If an agent fails, it will automatically try others.")
     print(f"\nYour payment address: {zynd_agent.pay_to_address}")
     print("(Make sure you have USDC on Base Sepolia for payments)")
-    print("\n" + "-"*60)
+    print("\n" + "-" * 60)
     print("Commands:")
     print("  Just type your question - agent will find the right expert")
     print("  'search <query>' - Search for agents without asking")
     print("  'reconnect' - Force search for a new agent")
     print("  'exit' - Quit the program")
-    print("-"*60 + "\n")
+    print("-" * 60 + "\n")
 
     connected = False
 
@@ -447,7 +481,9 @@ if __name__ == "__main__":
                     connected = client.connect_to_agent(agents[0])
                     print("\nReady to receive questions for this agent.")
                     if len(agents) > 1:
-                        print(f"({len(agents)-1} backup agents available if this one fails)")
+                        print(
+                            f"({len(agents) - 1} backup agents available if this one fails)"
+                        )
 
             else:
                 # Process the query - either use connected agent or find a new one
@@ -459,9 +495,9 @@ if __name__ == "__main__":
                     response = client.process_query(user_input)
                     connected = client.connected_agent is not None
 
-                print(f"\nAgent Response:\n{'-'*40}")
+                print(f"\nAgent Response:\n{'-' * 40}")
                 print(response)
-                print('-'*40)
+                print("-" * 40)
 
         except KeyboardInterrupt:
             print("\n\nInterrupted. Goodbye!")
@@ -469,4 +505,5 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error: {e}")
             import traceback
+
             traceback.print_exc()

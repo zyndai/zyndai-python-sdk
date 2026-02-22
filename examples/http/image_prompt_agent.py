@@ -8,6 +8,10 @@ calls a dummy vision API, and returns both a text response and an output image U
 This example shows the USER-LEVEL approach: images are passed via the `metadata` field
 of AgentMessage, which works today without any SDK changes.
 
+Features:
+- Multimodal image + text processing
+- Ngrok tunnel support for public access
+
 Architecture:
   User Agent --> POST /webhook (prompt + image_url in metadata)
       --> Image Prompt Agent receives message
@@ -30,6 +34,18 @@ Usage:
            ]
          }
        }'
+
+Running multiple agents on the same machine:
+    # Terminal 1 - Image agent on port 5000
+    python examples/http/image_prompt_agent.py
+
+    # Terminal 2 - LangChain agent on port 5003
+    python examples/http/stock_langchain.py
+
+    # Terminal 3 - User agent on port 5004
+    python examples/http/user_agent.py
+
+    Each agent gets its own ngrok tunnel and public URL automatically.
 """
 
 import os
@@ -144,7 +160,7 @@ def handle_image_prompt_message(zynd_agent: ZyndAIAgent):
 
 
 def main():
-    # Agent configuration
+    # Agent configuration with ngrok tunnel
     config = AgentConfig(
         name="ImagePromptAgent",
         description="An agent that accepts image URLs + text prompts, processes them via a vision API, and returns text + image responses.",
@@ -155,6 +171,12 @@ def main():
         webhook_port=5000,
         api_key=os.environ.get("ZYND_API_KEY", "your-api-key"),
         registry_url=os.environ.get("ZYND_REGISTRY_URL", "https://registry.zynd.ai"),
+        # Enable ngrok to expose this agent publicly (requires: pip install zyndai-agent[ngrok])
+        # Each agent on a different port gets its own ngrok tunnel URL
+        use_ngrok=True,
+        ngrok_auth_token=os.environ.get(
+            "NGROK_AUTH_TOKEN"
+        ),  # Or set globally via: ngrok config add-authtoken <token>
     )
 
     # Initialize agent
