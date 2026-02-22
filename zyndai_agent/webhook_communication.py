@@ -40,6 +40,8 @@ class WebhookCommunicationManager:
         identity_credential: dict = None,
         price: Optional[str] = "$0.01",
         pay_to_address: Optional[str] = None,
+        use_ngrok: bool = False,
+        ngrok_auth_token: Optional[str] = None,
     ):
         """
         Initialize the webhook agent communication manager.
@@ -60,6 +62,9 @@ class WebhookCommunicationManager:
         self.webhook_url = webhook_url
         self.auto_restart = auto_restart
         self.message_history_limit = message_history_limit
+        self.use_ngrok = use_ngrok
+        self.ngrok_auth_token = ngrok_auth_token
+        self.ngrok_tunnel = None
 
         self.identity_credential = identity_credential
 
@@ -118,6 +123,10 @@ class WebhookCommunicationManager:
 
         # Start webhook server
         self.start_webhook_server()
+
+        # Create ngrok tunnel if requested
+        if self.use_ngrok:
+            self._start_ngrok_tunnel()
 
         print("Agent webhook server started")
         print(f"Listening on {self.webhook_url}")
@@ -302,8 +311,53 @@ class WebhookCommunicationManager:
             logger.warning("Webhook server not running")
             return
 
+        # Close ngrok tunnel if active
+        if self.ngrok_tunnel is not None:
+            try:
+                from pyngrok import ngrok
+
+                ngrok.disconnect(self.ngrok_tunnel.public_url)
+                logger.info(f"[{self.agent_id}] Ngrok tunnel closed")
+            except Exception as e:
+                logger.warning(f"Failed to close ngrok tunnel: {e}")
+
         self.is_running = False
         logger.info(f"[{self.agent_id}] Webhook server stopped")
+
+    def _start_ngrok_tunnel(self):
+        """Create an ngrok tunnel to expose the local webhook server publicly."""
+        try:
+            from pyngrok import ngrok, conf
+        except ImportError:
+            raise ImportError(
+                "pyngrok is required for ngrok tunnel support. "
+                "Install it with: pip install zyndai-agent[ngrok]"
+            )
+
+        try:
+            # Set auth token if provided (otherwise pyngrok uses the global config)
+            if self.ngrok_auth_token:
+                conf.get_default().auth_token = self.ngrok_auth_token
+
+            # Create HTTP tunnel to the actual local port
+            self.ngrok_tunnel = ngrok.connect(self.webhook_port, "http")
+            public_url = self.ngrok_tunnel.public_url
+
+            # Override the webhook URL with the ngrok public URL
+            self.webhook_url = f"{public_url}/webhook"
+
+            logger.info(
+                f"[{self.agent_id}] Ngrok tunnel created: {public_url} -> localhost:{self.webhook_port}"
+            )
+            print(f"Ngrok tunnel active: {public_url} -> localhost:{self.webhook_port}")
+
+        except Exception as e:
+            logger.error(f"Failed to create ngrok tunnel: {e}")
+            raise RuntimeError(
+                f"Failed to create ngrok tunnel: {e}. "
+                "Make sure ngrok is installed and your auth token is valid. "
+                "Sign up at https://ngrok.com to get a free auth token."
+            )
 
     def send_message(
         self,

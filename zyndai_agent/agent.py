@@ -13,11 +13,13 @@ from enum import Enum
 
 class AgentFramework(str, Enum):
     """Supported AI agent frameworks."""
+
     LANGCHAIN = "langchain"
     LANGGRAPH = "langgraph"
     CREWAI = "crewai"
     PYDANTIC_AI = "pydantic_ai"
     CUSTOM = "custom"
+
 
 class AgentConfig(BaseModel):
     name: str = ""
@@ -34,6 +36,12 @@ class AgentConfig(BaseModel):
     webhook_url: Optional[str] = None  # Public URL if behind NAT
     api_key: Optional[str] = None  # API key for webhook registration
 
+    # Ngrok configuration
+    use_ngrok: bool = False  # Auto-create ngrok tunnel for public webhook URL
+    ngrok_auth_token: Optional[str] = (
+        None  # Ngrok auth token (optional if globally configured)
+    )
+
     # MQTT configuration (deprecated, kept for backward compatibility)
     mqtt_broker_url: Optional[str] = None
     default_outbox_topic: Optional[str] = None
@@ -43,10 +51,14 @@ class AgentConfig(BaseModel):
     # Config directory for agent identity (allows multiple agents in same project)
     config_dir: Optional[str] = None  # e.g., ".agent-stock" or ".agent-user"
 
-class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcessor, WebhookCommunicationManager):
 
+class ZyndAIAgent(
+    SearchAndDiscoveryManager,
+    IdentityManager,
+    X402PaymentProcessor,
+    WebhookCommunicationManager,
+):
     def __init__(self, agent_config: AgentConfig):
-
         self.agent_executor: Any = None
         self.agent_framework: AgentFramework = None
         self.custom_invoke_fn: Callable = None
@@ -65,14 +77,14 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
 
         IdentityManager.__init__(self, agent_config.registry_url)
 
-        SearchAndDiscoveryManager.__init__(
-            self,
-            registry_url=agent_config.registry_url
-        )
+        SearchAndDiscoveryManager.__init__(self, registry_url=agent_config.registry_url)
 
         # Determine communication mode: webhook or MQTT
         # Prefer webhook if webhook_port is configured
-        if agent_config.webhook_port is not None and agent_config.mqtt_broker_url is None:
+        if (
+            agent_config.webhook_port is not None
+            and agent_config.mqtt_broker_url is None
+        ):
             # Use webhook mode
             self.communication_mode = "webhook"
             WebhookCommunicationManager.__init__(
@@ -85,7 +97,9 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
                 message_history_limit=agent_config.message_history_limit,
                 identity_credential=self.identity_credential,
                 price=agent_config.price,
-                pay_to_address=self.pay_to_address
+                pay_to_address=self.pay_to_address,
+                use_ngrok=agent_config.use_ngrok,
+                ngrok_auth_token=agent_config.ngrok_auth_token,
             )
             self.update_agent_webhook_info()
 
@@ -101,18 +115,20 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
                 message_history_limit=agent_config.message_history_limit,
                 identity_credential=self.identity_credential,
                 secret_seed=self.secret_seed,
-                mqtt_broker_url=agent_config.mqtt_broker_url
+                mqtt_broker_url=agent_config.mqtt_broker_url,
             )
             self.update_agent_mqtt_info()
         else:
-            raise ValueError("Either webhook_port or mqtt_broker_url must be configured")
+            raise ValueError(
+                "Either webhook_port or mqtt_broker_url must be configured"
+            )
 
         # Display agent info
         self._display_agent_info()
 
-
-
-    def set_agent_executor(self, agent_executor: Any, framework: AgentFramework = AgentFramework.LANGCHAIN):
+    def set_agent_executor(
+        self, agent_executor: Any, framework: AgentFramework = AgentFramework.LANGCHAIN
+    ):
         """
         Set the agent executor for the agent.
 
@@ -169,7 +185,9 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
             return result.get("output", str(result))
 
         elif self.agent_framework == AgentFramework.LANGGRAPH:
-            result = self.agent_executor.invoke({"messages": [("user", input_text)], **kwargs})
+            result = self.agent_executor.invoke(
+                {"messages": [("user", input_text)], **kwargs}
+            )
             # Extract the last message content
             if "messages" in result and len(result["messages"]) > 0:
                 last_message = result["messages"][-1]
@@ -198,7 +216,7 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
             raise ValueError("Custom agent invoke function not set")
 
         else:
-            raise ValueError(f"Unknown agent framework: {self.agent_framework}") 
+            raise ValueError(f"Unknown agent framework: {self.agent_framework}")
 
     def update_agent_mqtt_info(self):
         """Updates the mqtt connection info of the agent into the registry so other agents can find me"""
@@ -207,11 +225,11 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
             f"{self.agent_config.registry_url}/agents/update-mqtt",
             data={
                 "seed": self.secret_seed,
-                "mqttUri": self.agent_config.mqtt_broker_url
-            }
+                "mqttUri": self.agent_config.mqtt_broker_url,
+            },
         )
 
-        if (updateResponse.status_code != 201):
+        if updateResponse.status_code != 201:
             raise Exception("Failed to update agent connection info in p3 registry.")
 
         print("Synced with the registry...")
@@ -219,16 +237,15 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
     def update_agent_webhook_info(self):
         """Updates the webhook URL of the agent into the registry so other agents can find me"""
         if not self.agent_config.api_key:
-            raise ValueError("API key is required for webhook registration. Please provide api_key in AgentConfig.")
+            raise ValueError(
+                "API key is required for webhook registration. Please provide api_key in AgentConfig."
+            )
 
-        headers = {
-            "accept": "*/*",
-            "X-API-KEY": self.agent_config.api_key
-        }
+        headers = {"accept": "*/*", "X-API-KEY": self.agent_config.api_key}
 
         payload = {
             "agentId": self.registry_agent_id,
-            "httpWebhookUrl": self.webhook_url
+            "httpWebhookUrl": self.webhook_url,
         }
 
         print(f"Updating webhook URL: {payload}")
@@ -236,11 +253,13 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
         updateResponse = requests.patch(
             f"{self.agent_config.registry_url}/agents/update-webhook",
             json=payload,
-            headers=headers
+            headers=headers,
         )
 
         if updateResponse.status_code != 200:
-            raise Exception(f"Failed to update agent webhook info in Zynd registry. Status: {updateResponse.status_code}, Response: {updateResponse.text}")
+            raise Exception(
+                f"Failed to update agent webhook info in Zynd registry. Status: {updateResponse.status_code}, Response: {updateResponse.text}"
+            )
 
         print("Synced webhook URL with the registry...")
 
@@ -267,6 +286,11 @@ class ZyndAIAgent(SearchAndDiscoveryManager, IdentityManager, X402PaymentProcess
         print(f"  Mode        : {mode}")
         if webhook_url:
             print(f"  Webhook URL : {webhook_url}")
+        ngrok_tunnel = getattr(self, "ngrok_tunnel", None)
+        if ngrok_tunnel:
+            print(f"  Ngrok       : Active ({ngrok_tunnel.public_url})")
+        elif self.agent_config.use_ngrok:
+            print(f"  Ngrok       : Configured (not connected)")
         print(f"  Price       : {price}")
         print(f"{border}\n")
 

@@ -7,6 +7,7 @@ A powerful Python SDK that enables AI agents to communicate securely and discove
 - **Auto-Provisioning**: Agents are automatically created and registered on first run
 - **Smart Agent Discovery**: Search and discover agents using semantic keyword matching
 - **HTTP Webhook Communication**: Async and sync request/response patterns with embedded Flask server
+- **Ngrok Tunnel Support**: Expose local agents to the internet with one config flag
 - **x402 Micropayments**: Built-in support for pay-per-use API endpoints
 - **Multi-Framework Support**: Works with LangChain, LangGraph, CrewAI, and PydanticAI
 - **Decentralized Identity**: Secure agent identity via Polygon ID credentials
@@ -17,12 +18,17 @@ A powerful Python SDK that enables AI agents to communicate securely and discove
 pip install zyndai-agent
 ```
 
+With ngrok tunnel support:
+```bash
+pip install zyndai-agent[ngrok]
+```
+
 Or install from source:
 
 ```bash
 git clone https://github.com/Zynd-AI-Network/zyndai-agent.git
 cd zyndai-agent
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ## Quick Start
@@ -195,6 +201,66 @@ response = agent.x402_processor.get(
     params={"symbol": "AAPL"}
 )
 print(response.json())
+```
+
+## Ngrok Tunnel (Public Webhook URL)
+
+By default, agents bind to `localhost` which is only reachable locally. To make your agent accessible from the internet (so other agents on different machines can reach it), enable the built-in ngrok tunnel.
+
+### Setup
+
+1. Sign up at [ngrok.com](https://ngrok.com) (free) and get your auth token
+2. Install with ngrok support: `pip install zyndai-agent[ngrok]`
+
+### Usage
+
+```python
+agent_config = AgentConfig(
+    name="My Public Agent",
+    description="Accessible from anywhere",
+    capabilities={"ai": ["nlp"], "protocols": ["http"]},
+    webhook_host="0.0.0.0",
+    webhook_port=5003,
+    registry_url="https://registry.zynd.ai",
+    api_key=os.environ["ZYND_API_KEY"],
+    use_ngrok=True,
+    ngrok_auth_token="your-ngrok-auth-token",  # Or set globally via: ngrok config add-authtoken <token>
+)
+
+agent = ZyndAIAgent(agent_config=agent_config)
+# Output:
+#   Ngrok tunnel active: https://a1b2c3d4.ngrok-free.app -> localhost:5003
+#   Webhook URL: https://a1b2c3d4.ngrok-free.app/webhook
+```
+
+The public ngrok URL is automatically registered with the ZyndAI registry, so other agents can discover and reach your agent without any manual URL configuration.
+
+If you've already configured ngrok globally (`ngrok config add-authtoken <token>`), you can omit `ngrok_auth_token`:
+
+```python
+agent_config = AgentConfig(
+    name="My Public Agent",
+    webhook_port=5003,
+    use_ngrok=True,  # Uses globally configured ngrok token
+    ...
+)
+```
+
+### Manual Alternative
+
+If you prefer to manage ngrok yourself, start the tunnel separately and pass the URL directly:
+
+```bash
+ngrok http 5003
+```
+
+```python
+agent_config = AgentConfig(
+    name="My Public Agent",
+    webhook_port=5003,
+    webhook_url="https://a1b2c3d4.ngrok-free.app/webhook",  # Your ngrok URL + /webhook
+    ...
+)
 ```
 
 ## Complete Example: Stock Comparison Agents
@@ -380,18 +446,20 @@ See `examples/http/` for complete examples of each framework.
 
 ## Configuration Options
 
-| Parameter      | Type   | Description                                        |
-| -------------- | ------ | -------------------------------------------------- |
-| `name`         | `str`  | Agent display name                                 |
-| `description`  | `str`  | Agent description (used for discovery)             |
-| `capabilities` | `dict` | Agent capabilities for semantic search             |
-| `webhook_host` | `str`  | Host to bind webhook server (default: "0.0.0.0")   |
-| `webhook_port` | `int`  | Port for webhook server (default: 5000)            |
-| `webhook_url`  | `str`  | Public URL if behind NAT (auto-generated if None)  |
-| `api_key`      | `str`  | ZyndAI API key (required)                          |
-| `registry_url` | `str`  | Registry URL (default: "https://registry.zynd.ai") |
-| `price`        | `str`  | Price per request for x402 (e.g., "$0.01")         |
-| `config_dir`   | `str`  | Custom config directory for agent identity         |
+| Parameter          | Type   | Description                                              |
+| ------------------ | ------ | -------------------------------------------------------- |
+| `name`             | `str`  | Agent display name                                       |
+| `description`      | `str`  | Agent description (used for discovery)                   |
+| `capabilities`     | `dict` | Agent capabilities for semantic search                   |
+| `webhook_host`     | `str`  | Host to bind webhook server (default: "0.0.0.0")        |
+| `webhook_port`     | `int`  | Port for webhook server (default: 5000)                  |
+| `webhook_url`      | `str`  | Public URL if behind NAT (auto-generated if None)        |
+| `api_key`          | `str`  | ZyndAI API key (required)                                |
+| `registry_url`     | `str`  | Registry URL (default: "https://registry.zynd.ai")       |
+| `price`            | `str`  | Price per request for x402 (e.g., "$0.01")               |
+| `config_dir`       | `str`  | Custom config directory for agent identity                |
+| `use_ngrok`        | `bool` | Auto-create ngrok tunnel for public URL (default: False) |
+| `ngrok_auth_token` | `str`  | Ngrok auth token (optional if globally configured)       |
 
 ## Webhook Endpoints
 

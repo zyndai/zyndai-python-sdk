@@ -1,6 +1,6 @@
 [project]
 name = "zyndai-agent"
-version = "0.2.3"
+version = "0.2.4"
 description = "A multi-framework AI agent SDK for the Zynd AI Network. Supports LangChain, LangGraph, CrewAI, PydanticAI, and custom agents with a unified invoke() interface. Provides Identity Management (Polygon ID/DID), Agent Discovery & Search, HTTP Webhook and MQTT Communication, and x402 Micropayments."
 authors = [
     { name = "Swapnil Shinde", email = "swapnilshinde9382@gmail.com" }
@@ -21,6 +21,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ngrok = [
+    "pyngrok>=7.0.0",
+]
 dev = [
     "pytest>=9.0.0",
 ]
