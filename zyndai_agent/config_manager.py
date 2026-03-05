@@ -32,8 +32,12 @@ class ConfigManager:
         if not os.path.exists(config_path):
             return None
 
-        with open(config_path, "r") as f:
-            config = json.load(f)
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+        except json.JSONDecodeError:
+            print(f"Warning: {config_path} is corrupted. Creating a new agent...")
+            return None
 
         print(f"Loaded agent config from {config_path}")
         return config
@@ -79,11 +83,23 @@ class ConfigManager:
             "status": "ACTIVE"
         }
 
-        response = requests.post(
-            f"{registry_url}/agents",
-            json=payload,
-            headers=headers
-        )
+        try:
+            response = requests.post(
+                f"{registry_url}/agents",
+                json=payload,
+                headers=headers,
+                timeout=10          # ← give up after 10 seconds
+            )
+        except requests.exceptions.ConnectionError:
+            raise RuntimeError(
+                f"Cannot reach registry at {registry_url}. "
+                "Check your internet connection and try again."
+            )
+        except requests.exceptions.Timeout:
+            raise RuntimeError(
+                f"Registry at {registry_url} did not respond within 10 seconds. "
+                "Try again later."
+            )
 
         if response.status_code not in (200, 201):
             raise RuntimeError(

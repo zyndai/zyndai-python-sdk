@@ -250,11 +250,23 @@ class ZyndAIAgent(
 
         print(f"Updating webhook URL: {payload}")
 
-        updateResponse = requests.patch(
-            f"{self.agent_config.registry_url}/agents/update-webhook",
-            json=payload,
-            headers=headers,
-        )
+        try:
+            updateResponse = requests.patch(
+                f"{self.agent_config.registry_url}/agents/update-webhook",
+                json=payload,
+                headers=headers,
+                timeout=10,
+            )
+        except requests.exceptions.ConnectionError:
+            raise RuntimeError(
+                f"Cannot reach registry at {self.agent_config.registry_url}. "
+                "Check your internet connection and try again."
+            )
+        except requests.exceptions.Timeout:
+            raise RuntimeError(
+                f"Registry at {self.agent_config.registry_url} did not respond within 10 seconds. "
+                "Try again later."
+            )
 
         if updateResponse.status_code != 200:
             raise Exception(
