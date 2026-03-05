@@ -35,7 +35,7 @@ pip install -e .
 
 ### 1. Get Your API Key
 
-1. Visit [dashboard.zynd.ai](https://zynd.ai)
+1. Visit [zynd.ai](https://zynd.ai)
 2. Connect your wallet and create an account
 3. Get your **API Key** from the dashboard
 
