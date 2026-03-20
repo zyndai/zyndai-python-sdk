@@ -94,8 +94,6 @@ Always be professional and note this is for informational purposes only.""",
     @agent.tool
     async def search_stock_data(ctx: RunContext[None], query: str) -> str:
         """Search for stock market data and news."""
-        # In production, use a real API like Alpha Vantage, Yahoo Finance, etc.
-        # For demo, we'll use a mock response
         return (
             f"Search results for '{query}': Stock market data retrieved. "
             f"This is a demo - integrate with real financial APIs for production use."
@@ -104,8 +102,6 @@ Always be professional and note this is for informational purposes only.""",
     @agent.tool
     async def get_stock_price(ctx: RunContext[None], symbol: str) -> str:
         """Get the current price for a stock symbol."""
-        # In production, call a real stock API
-        # Demo implementation
         demo_prices = {
             "AAPL": {"price": 178.50, "change": "+1.2%"},
             "GOOGL": {"price": 141.25, "change": "+0.8%"},
@@ -134,18 +130,17 @@ if __name__ == "__main__":
             "services": ["stock_comparison", "market_research"],
             "domains": ["finance", "stocks"],
         },
+        category="finance",
+        tags=["stocks", "analysis", "pydantic-ai", "type-safe"],
+        summary="Type-safe stock comparison agent built with PydanticAI and structured outputs.",
         webhook_host="0.0.0.0",
         webhook_port=5012,
-        registry_url="https://registry.zynd.ai",
+        registry_url=os.environ.get("ZYND_REGISTRY_URL", "http://localhost:8080"),
         price="$0.0001",
-        api_key=os.environ["ZYND_API_KEY"],
         config_dir=".agent-pydantic-ai",
         # Enable ngrok to expose this agent publicly (requires: pip install zyndai-agent[ngrok])
-        # Each agent on a different port gets its own ngrok tunnel URL
         use_ngrok=True,
-        ngrok_auth_token=os.environ.get(
-            "NGROK_AUTH_TOKEN"
-        ),  # Or set globally via: ngrok config add-authtoken <token>
+        ngrok_auth_token=os.environ.get("NGROK_AUTH_TOKEN"),
     )
 
     # Initialize ZyndAI agent

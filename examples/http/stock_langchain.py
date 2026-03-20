@@ -29,6 +29,16 @@ Running multiple agents on the same machine:
     python examples/http/user_agent.py
 
     Each agent gets its own ngrok tunnel and public URL automatically.
+
+Card-first flow (alternative):
+    # 1. Initialize developer identity
+    zynd init
+
+    # 2. Set up agent keypair + .env
+    zynd card init
+
+    # 3. Run normally — .well-known/agent.json is auto-generated on startup:
+    python examples/http/stock_langchain.py
 """
 
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent, AgentFramework
@@ -112,29 +122,30 @@ Always be professional and note this is for informational purposes only.""",
 
 
 if __name__ == "__main__":
-    # Create agent config with x402 payment and ngrok tunnel
+    # AgentConfig defines the agent metadata.
+    # If ZYND_AGENT_KEYPAIR_PATH is set in .env (via `zynd card init`),
+    # the keypair is loaded from there. Otherwise falls back to .agent/config.json.
+    # .well-known/agent.json is auto-generated on every startup.
     agent_config = AgentConfig(
         name="Stock Agent (LangChain)",
-        description="A stock comparison agent built with LangChain. "
-        "Provides financial analysis with tool calling and search capabilities.",
+        description="A stock comparison agent built with LangChain. Provides financial analysis with tool calling and search capabilities.",
         capabilities={
             "ai": ["nlp", "financial_analysis", "langchain"],
             "protocols": ["http"],
             "services": ["stock_comparison", "market_research"],
             "domains": ["finance", "stocks"],
         },
+        category="finance",
+        tags=["stocks", "analysis", "langchain"],
+        summary="Stock comparison and financial analysis agent using LangChain with search tools.",
         webhook_host="0.0.0.0",
         webhook_port=5003,
-        registry_url="https://registry.zynd.ai",
+        registry_url=os.environ.get("ZYND_REGISTRY_URL", "http://localhost:8080"),
         price="$0.0001",
-        api_key=os.environ["ZYND_API_KEY"],
         config_dir=".agent-langchain",
         # Enable ngrok to expose this agent publicly (requires: pip install zyndai-agent[ngrok])
-        # Each agent on a different port gets its own ngrok tunnel URL
         use_ngrok=True,
-        ngrok_auth_token=os.environ.get(
-            "NGROK_AUTH_TOKEN"
-        ),  # Or set globally via: ngrok config add-authtoken <token>
+        ngrok_auth_token=os.environ.get("NGROK_AUTH_TOKEN"),
     )
 
     # Initialize ZyndAI agent

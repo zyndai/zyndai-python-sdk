@@ -105,18 +105,17 @@ if __name__ == "__main__":
             "services": ["stock_comparison", "market_research"],
             "domains": ["finance", "stocks"],
         },
+        category="finance",
+        tags=["stocks", "analysis", "langgraph"],
+        summary="Stock comparison and financial analysis agent using LangGraph graph-based architecture.",
         webhook_host="0.0.0.0",
         webhook_port=5010,
-        registry_url="https://registry.zynd.ai",
+        registry_url=os.environ.get("ZYND_REGISTRY_URL", "http://localhost:8080"),
         price="$0.0001",
-        api_key=os.environ["ZYND_API_KEY"],
         config_dir=".agent-langgraph",
         # Enable ngrok to expose this agent publicly (requires: pip install zyndai-agent[ngrok])
-        # Each agent on a different port gets its own ngrok tunnel URL
         use_ngrok=True,
-        ngrok_auth_token=os.environ.get(
-            "NGROK_AUTH_TOKEN"
-        ),  # Or set globally via: ngrok config add-authtoken <token>
+        ngrok_auth_token=os.environ.get("NGROK_AUTH_TOKEN"),
     )
 
     # Initialize ZyndAI agent
