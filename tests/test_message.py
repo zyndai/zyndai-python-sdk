@@ -25,6 +25,7 @@ class TestAgentMessageCreation:
             content="response text",
             sender_id="agent-1",
             sender_did={"issuer": "did:test"},
+            sender_public_key="ed25519:AAAA",
             receiver_id="agent-2",
             message_type="response",
             message_id="msg-123",
@@ -34,6 +35,7 @@ class TestAgentMessageCreation:
         )
         assert msg.content == "response text"
         assert msg.sender_did == {"issuer": "did:test"}
+        assert msg.sender_public_key == "ed25519:AAAA"
         assert msg.receiver_id == "agent-2"
         assert msg.message_type == "response"
         assert msg.message_id == "msg-123"
@@ -60,6 +62,15 @@ class TestAgentMessageSerialization:
         assert d["message_id"] == "m1"
         assert d["conversation_id"] == "c1"
         assert "timestamp" in d
+
+    def test_to_dict_includes_sender_public_key(self):
+        msg = AgentMessage(
+            content="test",
+            sender_id="agent-1",
+            sender_public_key="ed25519:AAAA",
+        )
+        d = msg.to_dict()
+        assert d["sender_public_key"] == "ed25519:AAAA"
 
     def test_to_json(self):
         msg = AgentMessage(content="test", sender_id="agent-1")
@@ -110,8 +121,16 @@ class TestAgentMessageDeserialization:
             "sender_id": "agent-1",
         }
         msg = AgentMessage.from_dict(data)
-        # from_dict uses: data.get("prompt", data.get("content", ""))
         assert msg.content == "prompt value"
+
+    def test_from_dict_with_sender_public_key(self):
+        data = {
+            "content": "test",
+            "sender_id": "agent-1",
+            "sender_public_key": "ed25519:BBBB",
+        }
+        msg = AgentMessage.from_dict(data)
+        assert msg.sender_public_key == "ed25519:BBBB"
 
     def test_from_dict_defaults(self):
         msg = AgentMessage.from_dict({})

@@ -12,7 +12,10 @@ from zyndai_agent.utils import (
     decrypt_message,
     private_key_from_base64,
     derive_shared_key_from_seed_and_did,
+    encrypt_message_x25519,
+    decrypt_message_x25519,
 )
+from zyndai_agent.ed25519_identity import generate_keypair
 
 
 # ---------------------------------------------------------------------------
@@ -93,11 +96,11 @@ class TestExtractPublicKeyFromDID:
 
 
 # ---------------------------------------------------------------------------
-# Encryption / Decryption tests
+# Legacy Encryption / Decryption tests (ECIES-AES256-CBC-AuthBJJ)
 # ---------------------------------------------------------------------------
 
 
-class TestEncryptDecrypt:
+class TestLegacyEncryptDecrypt:
     def test_encrypt_returns_expected_keys(self):
         encrypted = encrypt_message("hello", SAMPLE_DID)
         assert "ephemeral_public_key" in encrypted
@@ -114,7 +117,6 @@ class TestEncryptDecrypt:
         assert decrypted == plaintext
 
     def test_encrypt_decrypt_empty_message(self):
-        # Empty string — edge case for padding
         encrypted = encrypt_message("", SAMPLE_DID)
         decrypted = decrypt_message(encrypted, SEED_32, SAMPLE_DID)
         assert decrypted == ""
@@ -146,6 +148,76 @@ class TestEncryptDecrypt:
 
 
 # ---------------------------------------------------------------------------
+# New X25519 + AES-256-GCM encryption tests
+# ---------------------------------------------------------------------------
+
+
+class TestX25519EncryptDecrypt:
+    def test_encrypt_returns_expected_keys(self):
+        kp = generate_keypair()
+        encrypted = encrypt_message_x25519("hello", kp.public_key_b64)
+        assert "ephemeral_public_key" in encrypted
+        assert "nonce" in encrypted
+        assert "encrypted_data" in encrypted
+        assert encrypted["algorithm"] == "X25519-AES256-GCM"
+
+    def test_encrypt_decrypt_roundtrip(self):
+        kp = generate_keypair()
+        plaintext = "Secret message via X25519"
+        encrypted = encrypt_message_x25519(plaintext, kp.public_key_b64)
+        decrypted = decrypt_message_x25519(encrypted, kp)
+        assert decrypted == plaintext
+
+    def test_encrypt_decrypt_empty(self):
+        kp = generate_keypair()
+        encrypted = encrypt_message_x25519("", kp.public_key_b64)
+        decrypted = decrypt_message_x25519(encrypted, kp)
+        assert decrypted == ""
+
+    def test_encrypt_decrypt_unicode(self):
+        kp = generate_keypair()
+        plaintext = "Unicode: 你好世界 🌍"
+        encrypted = encrypt_message_x25519(plaintext, kp.public_key_b64)
+        decrypted = decrypt_message_x25519(encrypted, kp)
+        assert decrypted == plaintext
+
+    def test_each_encryption_is_unique(self):
+        kp = generate_keypair()
+        e1 = encrypt_message_x25519("same", kp.public_key_b64)
+        e2 = encrypt_message_x25519("same", kp.public_key_b64)
+        assert e1["encrypted_data"] != e2["encrypted_data"]
+
+    def test_wrong_key_fails(self):
+        kp1 = generate_keypair()
+        kp2 = generate_keypair()
+        encrypted = encrypt_message_x25519("secret", kp1.public_key_b64)
+        with pytest.raises(Exception):
+            decrypt_message_x25519(encrypted, kp2)
+
+
+# ---------------------------------------------------------------------------
+# Auto-dispatch encrypt/decrypt tests
+# ---------------------------------------------------------------------------
+
+
+class TestAutoDispatchEncryption:
+    def test_string_arg_uses_x25519(self):
+        kp = generate_keypair()
+        encrypted = encrypt_message("hello", kp.public_key_b64)
+        assert encrypted["algorithm"] == "X25519-AES256-GCM"
+
+    def test_dict_arg_uses_legacy(self):
+        encrypted = encrypt_message("hello", SAMPLE_DID)
+        assert encrypted["algorithm"] == "ECIES-AES256-CBC-AuthBJJ"
+
+    def test_decrypt_dispatches_by_algorithm(self):
+        kp = generate_keypair()
+        encrypted = encrypt_message_x25519("test", kp.public_key_b64)
+        decrypted = decrypt_message(encrypted, kp)
+        assert decrypted == "test"
+
+
+# ---------------------------------------------------------------------------
 # private_key_from_base64 tests
 # ---------------------------------------------------------------------------
 
@@ -173,7 +245,7 @@ class TestPrivateKeyFromBase64:
 
 
 # ---------------------------------------------------------------------------
-# derive_shared_key_from_seed_and_did tests
+# derive_shared_key_from_seed_and_did tests (legacy)
 # ---------------------------------------------------------------------------
 
 
