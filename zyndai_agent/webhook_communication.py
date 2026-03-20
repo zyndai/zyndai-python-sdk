@@ -38,6 +38,8 @@ class WebhookCommunicationManager:
         auto_restart: bool = True,
         message_history_limit: int = 100,
         identity_credential: dict = None,
+        keypair=None,
+        agent_card_builder: Optional[Callable] = None,
         price: Optional[str] = "$0.01",
         pay_to_address: Optional[str] = None,
         use_ngrok: bool = False,
@@ -53,7 +55,9 @@ class WebhookCommunicationManager:
             webhook_url: Public webhook URL (auto-generated if None)
             auto_restart: Whether to attempt restart on failure
             message_history_limit: Maximum number of messages to keep in history
-            identity_credential: DID credential for this agent
+            identity_credential: DID credential for this agent (deprecated)
+            keypair: Ed25519Keypair for this agent
+            agent_card_builder: Callable that returns a signed Agent Card dict
         """
 
         self.agent_id = agent_id
@@ -67,6 +71,8 @@ class WebhookCommunicationManager:
         self.ngrok_tunnel = None
 
         self.identity_credential = identity_credential
+        self.keypair = keypair
+        self.agent_card_builder = agent_card_builder
 
         self.is_running = False
         self.is_agent_connected = False
@@ -147,6 +153,14 @@ class WebhookCommunicationManager:
             return jsonify(
                 {"status": "ok", "agent_id": self.agent_id, "timestamp": time.time()}
             ), 200
+
+        # Agent Card route for agent-dns
+        @self.flask_app.route("/.well-known/agent.json", methods=["GET"])
+        def agent_card():
+            if self.agent_card_builder:
+                card = self.agent_card_builder()
+                return jsonify(card), 200
+            return jsonify({"error": "Agent Card not configured"}), 404
 
     def _handle_webhook_request(self, sync=False):
         """Handle incoming webhook POST requests."""
@@ -390,10 +404,10 @@ class WebhookCommunicationManager:
                 receiver_id=receiver_id,
                 message_type=message_type,
                 sender_did=self.identity_credential,
+                sender_public_key=self.keypair.public_key_string if self.keypair else None,
             )
 
             # Convert to dict for JSON serialization
-            # Note: use to_dict() not to_json() - json= parameter expects a dict
             json_payload = message.to_dict()
 
             # Send HTTP POST request with JSON body
@@ -508,12 +522,7 @@ class WebhookCommunicationManager:
         logger.info(f"[{self.agent_id}] Set response for message {message_id}")
 
     def get_connection_status(self) -> Dict[str, Any]:
-        """
-        Get the current webhook server status and statistics.
-
-        Returns:
-            Dictionary with connection information
-        """
+        """Get the current webhook server status and statistics."""
         return {
             "agent_id": self.agent_id,
             "is_running": self.is_running,
@@ -527,16 +536,7 @@ class WebhookCommunicationManager:
     def get_message_history(
         self, limit: int = None, filter_by_topic: str = None
     ) -> List[Dict[str, Any]]:
-        """
-        Get the message history with optional filtering.
-
-        Args:
-            limit: Maximum number of messages to return (None for all)
-            filter_by_topic: Only return messages from this topic (not applicable for webhooks)
-
-        Returns:
-            List of message history entries
-        """
+        """Get the message history with optional filtering."""
         with self._lock:
             history = self.message_history.copy()
 
@@ -548,21 +548,54 @@ class WebhookCommunicationManager:
 
     def connect_agent(self, agent: AgentSearchResponse):
         """
-        Connect to another agent using their webhook URL.
+        Connect to another agent.
+
+        Supports both new agent-dns format (agent_url + Agent Card) and
+        legacy format (httpWebhookUrl).
 
         Args:
-            agent: Agent search response containing httpWebhookUrl
+            agent: Agent search response dict
         """
-        # Support both old 'webhookUrl' and new 'httpWebhookUrl' field names
-        webhook_url = agent.get("httpWebhookUrl") or agent.get("webhookUrl")
-        if not webhook_url:
-            raise ValueError(
-                "Agent does not have httpWebhookUrl. Cannot connect via webhook."
+        # New agent-dns format: use agent_url to fetch Agent Card
+        agent_url = agent.get("agent_url")
+        if agent_url:
+            # Try to fetch Agent Card to get invoke endpoint
+            try:
+                card_url = f"{agent_url.rstrip('/')}/.well-known/agent.json"
+                resp = requests.get(card_url, timeout=10)
+                if resp.status_code == 200:
+                    card = resp.json()
+                    endpoints = card.get("endpoints", {})
+                    invoke_url = endpoints.get("invoke")
+                    if invoke_url:
+                        self.target_webhook_url = invoke_url
+                        self.is_agent_connected = True
+                        logger.info(
+                            f"Connected to agent {agent.get('agent_id', agent.get('name', 'unknown'))} "
+                            f"via Agent Card at {self.target_webhook_url}"
+                        )
+                        return
+            except Exception as e:
+                logger.warning(f"Could not fetch Agent Card from {agent_url}: {e}")
+
+            # Fallback: use agent_url/webhook/sync directly
+            self.target_webhook_url = f"{agent_url.rstrip('/')}/webhook/sync"
+            self.is_agent_connected = True
+            logger.info(
+                f"Connected to agent at {self.target_webhook_url} (direct, no card)"
             )
+            return
 
-        self.target_webhook_url = webhook_url
-        self.is_agent_connected = True
+        # Legacy format: httpWebhookUrl or webhookUrl
+        webhook_url = agent.get("httpWebhookUrl") or agent.get("webhookUrl")
+        if webhook_url:
+            self.target_webhook_url = webhook_url
+            self.is_agent_connected = True
+            logger.info(
+                f"Connected to agent {agent.get('didIdentifier', agent.get('agent_id', 'unknown'))} at {self.target_webhook_url}"
+            )
+            return
 
-        logger.info(
-            f"Connected to agent {agent.get('didIdentifier', 'unknown')} at {self.target_webhook_url}"
+        raise ValueError(
+            "Agent does not have agent_url or httpWebhookUrl. Cannot connect via webhook."
         )

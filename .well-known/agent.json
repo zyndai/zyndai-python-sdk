@@ -1,0 +1,19 @@
+{
+  "agent_id": "agdns:4fdaa879f137b872e590246724ae3428",
+  "public_key": "ed25519:yxuqT0rAOF4YodB3GpO6nBtug2I3ykOAHwxgN+SME/A=",
+  "name": "TestAgent",
+  "description": "Test",
+  "version": "1.0",
+  "category": "general",
+  "agent_url": "http://localhost:15000",
+  "endpoints": {
+    "invoke": "http://localhost:15000/webhook/sync",
+    "invoke_async": "http://localhost:15000/webhook",
+    "health": "http://localhost:15000/health",
+    "agent_card": "http://localhost:15000/.well-known/agent.json"
+  },
+  "status": "online",
+  "last_heartbeat": "2026-03-20T13:52:34Z",
+  "signed_at": "2026-03-20T13:52:34Z",
+  "signature": "ed25519:tx+PzbujvmlaToXr/lwGvpsZzaAuGMZEceTJ6c4zBPmmfGlcxkue+ufGm07IubiuNLX4CACvMCHCT48Q8R6DBw=="
+}
