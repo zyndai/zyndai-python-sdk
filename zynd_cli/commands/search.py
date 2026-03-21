@@ -47,7 +47,9 @@ def run(args: argparse.Namespace):
         name = agent.get("name", "?")
         category = agent.get("category", "?")
         url = agent.get("agent_url", "?")
-        print(f"  {name}")
+        status = agent.get("status", "")
+        status_label = f"  [{status}]" if status else ""
+        print(f"  {name}{status_label}")
         print(f"    ID:       {agent_id}")
         print(f"    Category: {category}")
         print(f"    URL:      {url}")

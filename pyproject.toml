@@ -26,6 +26,9 @@ ngrok = [
 mqtt = [
     "paho-mqtt>=2.1.0",
 ]
+heartbeat = [
+    "websockets>=14.0",
+]
 dev = [
     "pytest>=9.0.0",
 ]

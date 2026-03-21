@@ -27,6 +27,8 @@ class AgentSearchResponse(TypedDict):
     score: float
     score_breakdown: Optional[dict]
     card: Optional[dict]  # if enrich=true
+    status: Optional[str]
+    last_heartbeat: Optional[str]
 
 
 class SearchAndDiscoveryManager:

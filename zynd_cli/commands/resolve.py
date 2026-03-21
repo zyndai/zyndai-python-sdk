@@ -32,6 +32,12 @@ def run(args: argparse.Namespace):
     print(f"  URL:        {result.get('agent_url', '?')}")
     print(f"  Category:   {result.get('category', '?')}")
     print(f"  Public key: {result.get('public_key', '?')}")
+    status = result.get("status")
+    if status:
+        print(f"  Status:     {status}")
+    last_hb = result.get("last_heartbeat")
+    if last_hb:
+        print(f"  Last heartbeat: {last_hb}")
     tags = result.get("tags", [])
     if tags:
         print(f"  Tags:       {', '.join(tags)}")
