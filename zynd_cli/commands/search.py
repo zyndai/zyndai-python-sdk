@@ -7,8 +7,8 @@ from zyndai_agent.dns_registry import search_agents
 from zynd_cli.config import get_registry_url
 
 
-def register_parser(subparsers: argparse._SubParsersAction):
-    p = subparsers.add_parser("search", help="Search for agents")
+def register_parser(subparsers: argparse._SubParsersAction, parents=None):
+    p = subparsers.add_parser("search", help="Search for agents", parents=parents or [])
     p.add_argument("query", nargs="?", help="Search query")
     p.add_argument("--category", help="Filter by category")
     p.add_argument("--tags", nargs="*", help="Filter by tags")

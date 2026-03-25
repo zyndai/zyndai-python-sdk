@@ -9,8 +9,8 @@ from zyndai_agent.dns_registry import delete_agent
 from zynd_cli.config import get_registry_url, developer_key_path, agents_dir
 
 
-def register_parser(subparsers: argparse._SubParsersAction):
-    p = subparsers.add_parser("deregister", help="Remove an agent from the registry")
+def register_parser(subparsers: argparse._SubParsersAction, parents=None):
+    p = subparsers.add_parser("deregister", help="Remove an agent from the registry", parents=parents or [])
     p.add_argument("agent_id", help="Agent ID to deregister (agdns:...)")
     p.add_argument("--keypair", help="Path to agent keypair JSON")
     p.add_argument("--index", type=int, help="Agent derivation index (to find keypair in ~/.zynd/agents/)")

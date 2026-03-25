@@ -26,8 +26,8 @@ from zynd_cli.config import (
 from zynd_cli.templates import FRAMEWORKS, FRAMEWORK_ORDER
 
 
-def register_parser(subparsers: argparse._SubParsersAction):
-    p = subparsers.add_parser("agent", help="Agent project management")
+def register_parser(subparsers: argparse._SubParsersAction, parents=None):
+    p = subparsers.add_parser("agent", help="Agent project management", parents=parents or [])
     sub = p.add_subparsers(dest="agent_command")
 
     # zynd agent init

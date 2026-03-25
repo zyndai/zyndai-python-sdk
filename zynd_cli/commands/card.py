@@ -19,8 +19,8 @@ from zynd_cli.config import (
 )
 
 
-def register_parser(subparsers: argparse._SubParsersAction):
-    p = subparsers.add_parser("card", help="Agent Card management")
+def register_parser(subparsers: argparse._SubParsersAction, parents=None):
+    p = subparsers.add_parser("card", help="Agent Card management", parents=parents or [])
     sub = p.add_subparsers(dest="card_action")
 
     # zynd card init

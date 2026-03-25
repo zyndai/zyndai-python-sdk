@@ -9,7 +9,7 @@ import requests
 from zynd_cli.config import get_registry_url
 
 
-def register_parser(subparsers: argparse._SubParsersAction):
+def register_parser(subparsers: argparse._SubParsersAction, parents=None):
     p = subparsers.add_parser("status", help="Check registry node status")
     p.add_argument("--json", dest="output_json", action="store_true", help="Output as JSON")
     p.set_defaults(func=run)

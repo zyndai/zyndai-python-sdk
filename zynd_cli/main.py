@@ -17,32 +17,36 @@ from zynd_cli.commands import (
     status,
 )
 
+# Shared parent parser with --registry flag — inherited by all subcommands
+_registry_parent = argparse.ArgumentParser(add_help=False)
+_registry_parent.add_argument(
+    "--registry",
+    help="Registry URL (overrides env/config)",
+    default=None,
+)
+
 
 def main():
     parser = argparse.ArgumentParser(
         prog="zynd",
         description="Developer CLI for the Zynd AI Agent Network",
+        parents=[_registry_parent],
     )
     parser.add_argument("--version", action="version", version=f"zynd {__version__}")
-    parser.add_argument(
-        "--registry",
-        help="Registry URL (overrides env/config)",
-        default=None,
-    )
 
     subparsers = parser.add_subparsers(dest="command")
 
-    # Register all subcommands
-    agent_cmd.register_parser(subparsers)
+    # Register all subcommands — each gets --registry via parents
+    agent_cmd.register_parser(subparsers, parents=[_registry_parent])
     auth.register_parser(subparsers)
     init_cmd.register_parser(subparsers)
-    register.register_parser(subparsers)
-    search.register_parser(subparsers)
-    resolve.register_parser(subparsers)
-    card.register_parser(subparsers)
-    deregister.register_parser(subparsers)
+    register.register_parser(subparsers, parents=[_registry_parent])
+    search.register_parser(subparsers, parents=[_registry_parent])
+    resolve.register_parser(subparsers, parents=[_registry_parent])
+    card.register_parser(subparsers, parents=[_registry_parent])
+    deregister.register_parser(subparsers, parents=[_registry_parent])
     keys.register_parser(subparsers)
-    status.register_parser(subparsers)
+    status.register_parser(subparsers, parents=[_registry_parent])
 
     args = parser.parse_args()
 
@@ -51,11 +55,9 @@ def main():
         sys.exit(0)
 
     if not hasattr(args, "func"):
-        # Subcommand group (e.g. "zynd auth") without a specific subcommand
         parser.parse_args([args.command, "--help"])
         sys.exit(0)
 
-    # Pass registry flag down to commands
     args.func(args)
 
 
