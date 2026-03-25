@@ -43,15 +43,21 @@ def register_parser(subparsers: argparse._SubParsersAction):
     reg_p.add_argument("--agent-url", help="Override agent URL for registration")
     reg_p.set_defaults(func=_agent_register)
 
+    # zynd agent run
+    run_p = sub.add_parser("run", help="Run the agent from current directory")
+    run_p.add_argument("--port", type=int, help="Override webhook port")
+    run_p.set_defaults(func=_agent_run)
+
     p.set_defaults(func=_agent_help)
 
 
 def _agent_help(args: argparse.Namespace):
-    print("Usage: zynd agent {init,register}")
+    print("Usage: zynd agent {init,register,run}")
     print()
     print("Commands:")
     print("  init       Create a new agent project (interactive wizard)")
     print("  register   Register agent on the AgentDNS network")
+    print("  run        Run the agent from current directory")
 
 
 def _agent_init(args: argparse.Namespace):
@@ -67,35 +73,31 @@ def _agent_init(args: argparse.Namespace):
     # 2. Select framework
     framework = getattr(args, "framework", None)
     if not framework:
-        print("\nSelect a framework:\n")
-        for i, fw_key in enumerate(FRAMEWORK_ORDER, 1):
-            fw = FRAMEWORKS[fw_key]
-            print(f"  {i}. {fw['label']:15s} — {fw['description']}")
-        print()
+        from zynd_cli.tui import select as tui_select
 
-        while True:
-            try:
-                choice = input("Enter number (1-5): ").strip()
-                idx = int(choice) - 1
-                if 0 <= idx < len(FRAMEWORK_ORDER):
-                    framework = FRAMEWORK_ORDER[idx]
-                    break
-            except (ValueError, EOFError):
-                pass
-            print("Invalid choice. Enter a number 1-5.")
+        options = [
+            {"label": fw["label"], "description": fw["description"]}
+            for fw in [FRAMEWORKS[k] for k in FRAMEWORK_ORDER]
+        ]
+        idx = tui_select("Select a framework", options)
+        framework = FRAMEWORK_ORDER[idx]
 
     fw_info = FRAMEWORKS[framework]
-    print(f"\nFramework: {fw_info['label']}")
+
+    from rich.console import Console
+    console = Console()
+    console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Framework: [bold]{fw_info['label']}[/bold]")
 
     # 3. Get agent name
     name = getattr(args, "name", None) or ""
     if not name:
-        name = input("Agent name: ").strip()
+        from zynd_cli.tui import prompt as tui_prompt
+        name = tui_prompt("Agent name")
     if not name:
         print("Error: Agent name is required.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Agent name: {name}")
+    console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Name: [bold]{name}[/bold]")
 
     # 4. Derive agent keypair into ~/.zynd/agents/<agent_name>/keypair.json
     ensure_zynd_dir()
@@ -129,24 +131,24 @@ def _agent_init(args: argparse.Namespace):
 
     if kp_path.exists():
         kp = load_keypair(str(kp_path))
-        print(f"\nUsing existing keypair: {kp_path}")
+        console.print(f"  [dim]Using existing keypair:[/dim] {kp_path}")
     else:
         kp = derive_agent_keypair(dev_kp.private_key, index)
         save_keypair(kp, str(kp_path), derivation_metadata={
             "developer_public_key": dev_kp.public_key_b64,
             "index": index,
         })
-        print(f"\nDerived keypair at index {index}: {kp_path}")
+        console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Derived keypair at index {index}")
 
-    print(f"  Agent ID:   {kp.agent_id}")
-    print(f"  Public key: {kp.public_key_string}")
+    console.print(f"  [dim]Agent ID:[/dim]   {kp.agent_id}")
+    console.print(f"  [dim]Public key:[/dim] {kp.public_key_string}")
 
     # 5. Check for existing files
     if os.path.exists("agent.py"):
-        print("\nWarning: agent.py already exists in current directory.", file=sys.stderr)
-        overwrite = input("Overwrite? (y/N): ").strip().lower()
+        console.print("\n  [bold yellow]Warning:[/bold yellow] agent.py already exists.")
+        overwrite = input("  Overwrite? (y/N): ").strip().lower()
         if overwrite != "y":
-            print("Aborted.")
+            console.print("  [dim]Aborted.[/dim]")
             return
 
     # 6. Create agent.config.json
@@ -167,7 +169,6 @@ def _agent_init(args: argparse.Namespace):
 
     with open("agent.config.json", "w") as f:
         json.dump(config, f, indent=2)
-    print(f"\nCreated agent.config.json")
 
     # 7. Create .env
     env_lines = [
@@ -177,9 +178,7 @@ def _agent_init(args: argparse.Namespace):
     ]
     for key in fw_info.get("env_keys", []):
         env_lines.append(f"{key}=")
-
     _write_file(".env", "\n".join(env_lines) + "\n")
-    print("Created .env")
 
     # 8. Create agent.py from template
     tpl_name = framework.replace("-", "_") + ".py.tpl"
@@ -187,12 +186,10 @@ def _agent_init(args: argparse.Namespace):
 
     if tpl_path.exists():
         template = tpl_path.read_text()
-        # Replace {agent_name} placeholder, but leave {query}, {str(e)}, etc. alone
         agent_code = template.replace("{agent_name}", name)
         _write_file("agent.py", agent_code)
-        print("Created agent.py")
     else:
-        print(f"Warning: Template not found: {tpl_name}", file=sys.stderr)
+        console.print(f"  [yellow]Warning: Template not found: {tpl_name}[/yellow]")
 
     # 9. Create .well-known/ directory
     os.makedirs(".well-known", exist_ok=True)
@@ -200,28 +197,33 @@ def _agent_init(args: argparse.Namespace):
         {"_note": "This file is auto-generated when the agent runs. Do not edit manually."},
         indent=2,
     ))
-    print("Created .well-known/agent.json (placeholder)")
+
+    console.print()
+    console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] agent.config.json")
+    console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] .env")
+    console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] agent.py")
+    console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] .well-known/agent.json")
 
     # 10. Summary
-    print(f"\n{'=' * 50}")
-    print(f"Agent project created!")
-    print(f"{'=' * 50}")
-    print(f"  Name:      {name}")
-    print(f"  Framework: {fw_info['label']}")
-    print(f"  Agent ID:  {kp.agent_id}")
-    print(f"  Keypair:   {kp_path}")
-    print()
-    print(f"Next steps:")
-    print(f"  1. Install dependencies:")
-    print(f"     {fw_info['install']}")
+    console.print()
+    console.print(f"  [bold green]Agent project created![/bold green]")
+    console.print()
+    console.print(f"  [dim]Name[/dim]       {name}")
+    console.print(f"  [dim]Framework[/dim]   {fw_info['label']}")
+    console.print(f"  [dim]Agent ID[/dim]    {kp.agent_id}")
+    console.print(f"  [dim]Keypair[/dim]     {kp_path}")
+    console.print()
+    console.print(f"  [bold]Next steps:[/bold]")
+    console.print(f"  [dim]1.[/dim] Install dependencies:")
+    console.print(f"     [bold #8B5CF6]{fw_info['install']}[/bold #8B5CF6]")
+    step = 2
     if fw_info.get("env_keys"):
-        print(f"  2. Add your API keys to .env")
-        print(f"  3. Run your agent:")
-    else:
-        print(f"  2. Run your agent:")
-    print(f"     python agent.py")
-    print()
-    print(f"The agent will auto-register on the network when it starts.")
+        console.print(f"  [dim]{step}.[/dim] Add your API keys to [bold].env[/bold]")
+        step += 1
+    console.print(f"  [dim]{step}.[/dim] Run your agent:")
+    console.print(f"     [bold #8B5CF6]python agent.py[/bold #8B5CF6]")
+    console.print()
+    console.print(f"  [dim]The agent will auto-register on the network when it starts.[/dim]")
 
 
 def _agent_register(args: argparse.Namespace):
@@ -292,6 +294,55 @@ def _agent_register(args: argparse.Namespace):
     except Exception as e:
         print(f"Registration failed: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def _agent_run(args: argparse.Namespace):
+    """Run the agent from the current directory using agent.config.json."""
+    import subprocess
+
+    config_file = "agent.config.json"
+    if not os.path.exists(config_file):
+        print("Error: agent.config.json not found in current directory.", file=sys.stderr)
+        print("Make sure you're in the agent's root directory, or run 'zynd agent init' first.")
+        sys.exit(1)
+
+    if not os.path.exists("agent.py"):
+        print("Error: agent.py not found in current directory.", file=sys.stderr)
+        sys.exit(1)
+
+    with open(config_file) as f:
+        config = json.load(f)
+
+    # Override port if specified
+    port = getattr(args, "port", None)
+    if port:
+        os.environ["ZYND_WEBHOOK_PORT"] = str(port)
+
+    # Ensure keypair path is set in env
+    keypair_path = config.get("keypair_path", "")
+    if keypair_path and not os.environ.get("ZYND_AGENT_KEYPAIR_PATH"):
+        os.environ["ZYND_AGENT_KEYPAIR_PATH"] = keypair_path
+
+    # Ensure registry URL is set
+    registry_url = config.get("registry_url", "")
+    if registry_url and not os.environ.get("ZYND_REGISTRY_URL"):
+        os.environ["ZYND_REGISTRY_URL"] = registry_url
+
+    from rich.console import Console
+    console = Console()
+    console.print()
+    console.print(f"  [bold #8B5CF6]▶[/bold #8B5CF6] Running [bold]{config.get('name', 'agent')}[/bold] ({config.get('framework', 'custom')})")
+    console.print(f"  [dim]Keypair:[/dim] {keypair_path}")
+    console.print(f"  [dim]Registry:[/dim] {registry_url}")
+    console.print()
+
+    try:
+        subprocess.run([sys.executable, "agent.py"], check=True)
+    except KeyboardInterrupt:
+        console.print("\n  [dim]Agent stopped.[/dim]")
+    except subprocess.CalledProcessError as e:
+        print(f"Agent exited with code {e.returncode}", file=sys.stderr)
+        sys.exit(e.returncode)
 
 
 def _write_file(path: str, content: str):
