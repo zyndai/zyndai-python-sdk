@@ -9,7 +9,7 @@ from zynd_cli.config import get_registry_url
 
 
 def register_parser(subparsers: argparse._SubParsersAction, parents=None):
-    p = subparsers.add_parser("resolve", help="Resolve an agent by ID")
+    p = subparsers.add_parser("resolve", help="Resolve an agent by ID", parents=parents or [])
     p.add_argument("agent_id", help="Agent ID (agdns:...)")
     p.add_argument("--json", dest="output_json", action="store_true", help="Output as JSON")
     p.set_defaults(func=run)
