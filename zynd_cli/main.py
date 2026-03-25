@@ -5,6 +5,7 @@ import sys
 
 from zynd_cli import __version__
 from zynd_cli.commands import (
+    auth,
     init_cmd,
     register,
     search,
@@ -31,6 +32,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command")
 
     # Register all subcommands
+    auth.register_parser(subparsers)
     init_cmd.register_parser(subparsers)
     register.register_parser(subparsers)
     search.register_parser(subparsers)
@@ -44,6 +46,11 @@ def main():
 
     if args.command is None:
         parser.print_help()
+        sys.exit(0)
+
+    if not hasattr(args, "func"):
+        # Subcommand group (e.g. "zynd auth") without a specific subcommand
+        parser.parse_args([args.command, "--help"])
         sys.exit(0)
 
     # Pass registry flag down to commands
