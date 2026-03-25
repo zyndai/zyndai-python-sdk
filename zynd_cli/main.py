@@ -5,6 +5,7 @@ import sys
 
 from zynd_cli import __version__
 from zynd_cli.commands import (
+    agent_cmd,
     auth,
     init_cmd,
     register,
@@ -32,6 +33,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command")
 
     # Register all subcommands
+    agent_cmd.register_parser(subparsers)
     auth.register_parser(subparsers)
     init_cmd.register_parser(subparsers)
     register.register_parser(subparsers)

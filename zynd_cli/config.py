@@ -5,7 +5,9 @@ Layout:
   ~/.zynd/
     config.json        — default registry URL, preferences
     developer.json     — developer Ed25519 keypair
-    agents/            — per-agent keypair files (agent-0.json, …)
+    agents/
+      <agent-name>/    — per-agent directory
+        keypair.json   — agent Ed25519 keypair
 """
 
 import json
@@ -42,6 +44,17 @@ def developer_key_path() -> Path:
 
 def agents_dir() -> Path:
     return zynd_dir() / AGENTS_DIR_NAME
+
+
+def agent_dir(agent_name: str) -> Path:
+    """Return ~/.zynd/agents/<agent_name>/."""
+    safe_name = agent_name.lower().replace(" ", "-")
+    return agents_dir() / safe_name
+
+
+def agent_keypair_path(agent_name: str) -> Path:
+    """Return ~/.zynd/agents/<agent_name>/keypair.json."""
+    return agent_dir(agent_name) / "keypair.json"
 
 
 def load_config() -> dict:
