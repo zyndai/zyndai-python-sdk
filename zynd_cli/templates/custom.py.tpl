@@ -1,5 +1,5 @@
 """
-{agent_name} — Custom Agent on ZyndAI Network
+__AGENT_NAME__ — Custom Agent on ZyndAI Network
 
 Install dependencies:
     pip install zyndai-agent
@@ -19,20 +19,20 @@ load_dotenv()
 
 def handle_request(query: str) -> str:
     """Your agent logic here. Replace this with your own implementation."""
-    return f"Hello from {agent_name}! You asked: {{query}}"
+    return f"Hello from __AGENT_NAME__! You asked: {query}"
 
 
 if __name__ == "__main__":
     agent_config = AgentConfig(
-        name="{agent_name}",
-        description="{agent_name} — a custom agent on the ZyndAI network.",
-        capabilities={{
+        name="__AGENT_NAME__",
+        description="__AGENT_NAME__ — a custom agent on the ZyndAI network.",
+        capabilities={
             "ai": ["custom"],
             "protocols": ["http"],
-        }},
+        },
         category="general",
         tags=[],
-        summary="{agent_name} agent",
+        summary="__AGENT_NAME__ agent",
         webhook_host="0.0.0.0",
         webhook_port=5000,
         registry_url=os.environ.get("ZYND_REGISTRY_URL", "http://localhost:8080"),
@@ -46,12 +46,12 @@ if __name__ == "__main__":
             response = handle_request(message.content)
             zynd_agent.set_response(message.message_id, response)
         except Exception as e:
-            zynd_agent.set_response(message.message_id, f"Error: {{str(e)}}")
+            zynd_agent.set_response(message.message_id, f"Error: {str(e)}")
 
     zynd_agent.add_message_handler(message_handler)
 
-    print(f"\n{agent_name} is running")
-    print(f"Webhook: {{zynd_agent.webhook_url}}")
+    print(f"\n__AGENT_NAME__ is running")
+    print(f"Webhook: {zynd_agent.webhook_url}")
     print("Type 'exit' to quit\n")
 
     while True:

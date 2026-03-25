@@ -186,7 +186,7 @@ def _agent_init(args: argparse.Namespace):
 
     if tpl_path.exists():
         template = tpl_path.read_text()
-        agent_code = template.replace("{agent_name}", name)
+        agent_code = template.replace("__AGENT_NAME__", name)
         _write_file("agent.py", agent_code)
     else:
         console.print(f"  [yellow]Warning: Template not found: {tpl_name}[/yellow]")

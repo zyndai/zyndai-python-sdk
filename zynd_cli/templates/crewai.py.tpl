@@ -1,5 +1,5 @@
 """
-{agent_name} — CrewAI Agent on ZyndAI Network
+__AGENT_NAME__ — CrewAI Agent on ZyndAI Network
 
 Install dependencies:
     pip install zyndai-agent crewai crewai-tools
@@ -39,13 +39,13 @@ def create_crew():
     )
 
     research_task = Task(
-        description="Research the topic: {{query}}. Gather key data and facts.",
+        description="Research the topic: {query}. Gather key data and facts.",
         expected_output="Comprehensive research data",
         agent=researcher,
     )
 
     analysis_task = Task(
-        description="Analyze the research and provide insights on: {{query}}",
+        description="Analyze the research and provide insights on: {query}",
         expected_output="Professional analysis with key takeaways",
         agent=analyst,
     )
@@ -60,15 +60,15 @@ def create_crew():
 
 if __name__ == "__main__":
     agent_config = AgentConfig(
-        name="{agent_name}",
-        description="{agent_name} — a CrewAI multi-agent system on the ZyndAI network.",
-        capabilities={{
+        name="__AGENT_NAME__",
+        description="__AGENT_NAME__ — a CrewAI multi-agent system on the ZyndAI network.",
+        capabilities={
             "ai": ["nlp", "crewai", "multi_agent"],
             "protocols": ["http"],
-        }},
+        },
         category="general",
         tags=["crewai", "multi-agent"],
-        summary="{agent_name} agent",
+        summary="__AGENT_NAME__ agent",
         webhook_host="0.0.0.0",
         webhook_port=5000,
         registry_url=os.environ.get("ZYND_REGISTRY_URL", "http://localhost:8080"),
@@ -84,12 +84,12 @@ if __name__ == "__main__":
             response = zynd_agent.invoke(message.content)
             zynd_agent.set_response(message.message_id, response)
         except Exception as e:
-            zynd_agent.set_response(message.message_id, f"Error: {{str(e)}}")
+            zynd_agent.set_response(message.message_id, f"Error: {str(e)}")
 
     zynd_agent.add_message_handler(message_handler)
 
-    print(f"\n{agent_name} is running (CrewAI)")
-    print(f"Webhook: {{zynd_agent.webhook_url}}")
+    print(f"\n__AGENT_NAME__ is running (CrewAI)")
+    print(f"Webhook: {zynd_agent.webhook_url}")
     print("Type 'exit' to quit\n")
 
     while True:
