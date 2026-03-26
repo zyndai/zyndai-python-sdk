@@ -34,6 +34,27 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+try:
+    from rich.console import Console
+    _console = Console()
+    def _log(msg: str, style: str = "dim"):
+        _console.print(f"  {msg}", style=style)
+    def _log_ok(msg: str):
+        _console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] {msg}")
+    def _log_warn(msg: str):
+        _console.print(f"  [bold yellow]⚠[/bold yellow] {msg}")
+    def _log_err(msg: str):
+        _console.print(f"  [bold red]✗[/bold red] {msg}")
+    def _log_heartbeat(msg: str):
+        _console.print(f"  [dim #06B6D4]♥[/dim #06B6D4] [dim]{msg}[/dim]")
+except ImportError:
+    _console = None
+    def _log(msg, style=None): print(f"  {msg}")
+    def _log_ok(msg): print(f"  ✓ {msg}")
+    def _log_warn(msg): print(f"  ⚠ {msg}")
+    def _log_err(msg): print(f"  ✗ {msg}")
+    def _log_heartbeat(msg): print(f"  ♥ {msg}")
+
 
 class AgentFramework(str, Enum):
     """Supported AI agent frameworks."""
@@ -325,15 +346,15 @@ class ZyndAIAgent(
                 try:
                     import websockets.sync.client as ws_client
 
-                    logger.info(f"Heartbeat: connecting to {ws_url}")
+                    _log_heartbeat(f"Connecting to {ws_url}")
                     with ws_client.connect(ws_url) as ws:
-                        logger.info(f"Heartbeat: connected")
+                        _log_heartbeat("Connected — sending heartbeats every 30s")
                         while not self._heartbeat_stop.is_set():
                             ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                             signature = ed25519_sign(self.keypair.private_key, ts.encode())
                             payload = json.dumps({"timestamp": ts, "signature": signature})
                             ws.send(payload)
-                            logger.info(f"Heartbeat sent: {ts}")
+                            _log_heartbeat(f"Sent heartbeat {ts}")
 
                             # Sleep 30s in small increments so we can stop quickly
                             for _ in range(30):
@@ -342,13 +363,10 @@ class ZyndAIAgent(
                                 time.sleep(1)
 
                 except ImportError:
-                    logger.warning(
-                        "Heartbeat: websockets package not installed. "
-                        "Install with: pip install websockets"
-                    )
+                    _log_warn("Heartbeat: websockets not installed. pip install websockets")
                     return
                 except Exception as e:
-                    logger.debug(f"Heartbeat connection failed: {e}")
+                    _log_heartbeat(f"Connection lost: {e} — reconnecting in 5s")
                     # Reconnect after 5s
                     for _ in range(5):
                         if self._heartbeat_stop.is_set():
@@ -361,14 +379,13 @@ class ZyndAIAgent(
             name=f"Heartbeat-{self.agent_id}",
         )
         self._heartbeat_thread.start()
-        logger.info("Heartbeat thread started")
 
     def stop_heartbeat(self):
         """Stop the heartbeat background thread."""
         if self._heartbeat_thread and self._heartbeat_thread.is_alive():
             self._heartbeat_stop.set()
             self._heartbeat_thread.join(timeout=5)
-            logger.info("Heartbeat thread stopped")
+            _log_heartbeat("Heartbeat stopped")
 
     @staticmethod
     def _try_resolve_keypair(agent_config) -> Optional[Ed25519Keypair]:
@@ -446,7 +463,7 @@ class ZyndAIAgent(
                     developer_id=developer_id,
                     developer_proof=developer_proof,
                 )
-                print(f"Agent registered on registry: {self.agent_id}")
+                _log_ok(f"Registered on network: {self.agent_id}")
 
             elif current_hash != stored_hash:
                 # Card changed — update registry
@@ -458,17 +475,17 @@ class ZyndAIAgent(
                     "summary": self._static_card.get("summary", ""),
                 }
                 if dns_registry.update_agent(registry_url, self.agent_id, self.keypair, updates):
-                    print(f"Agent updated on registry: {self.agent_id}")
+                    _log_ok(f"Updated on network: {self.agent_id}")
                 else:
-                    print(f"Warning: Failed to update agent on registry")
+                    _log_warn("Failed to update agent on registry")
             else:
-                print(f"Agent already registered (no changes): {self.agent_id}")
+                _log_ok(f"Already registered (no changes)")
 
             self._save_card_hash(current_hash)
 
         except Exception as e:
             logger.warning(f"Self-registration failed: {e}")
-            print(f"Warning: Could not self-register on registry: {e}")
+            _log_warn(f"Could not self-register: {e}")
 
     def _load_card_hash(self) -> Optional[str]:
         """Load the stored card hash from .agent/card_hash."""
@@ -497,26 +514,46 @@ class ZyndAIAgent(
         mode = self.communication_mode or "-"
         webhook_url = getattr(self, "webhook_url", None)
         price = self.agent_config.price or "Free"
-
-        # Show public key if available
         pub_key = self.keypair.public_key_string if self.keypair else "-"
 
-        border = "=" * 60
-        print(f"\n{border}")
-        print(f"  ZYND AI AGENT")
-        print(f"{border}")
-        print(f"  Name        : {name}")
-        print(f"  Description : {description}")
-        print(f"  Agent ID    : {agent_id}")
-        print(f"  Public Key  : {pub_key}")
-        print(f"  Address     : {address}")
-        print(f"  Mode        : {mode}")
-        if webhook_url:
-            print(f"  Webhook URL : {webhook_url}")
-        ngrok_tunnel = getattr(self, "ngrok_tunnel", None)
-        if ngrok_tunnel:
-            print(f"  Ngrok       : Active ({ngrok_tunnel.public_url})")
-        elif self.agent_config.use_ngrok:
-            print(f"  Ngrok       : Configured (not connected)")
-        print(f"  Price       : {price}")
-        print(f"{border}\n")
+        if _console:
+            _console.print()
+            _console.print(f"  [bold #8B5CF6]╔{'═' * 56}╗[/bold #8B5CF6]")
+            _console.print(f"  [bold #8B5CF6]║[/bold #8B5CF6]  [bold white]ZYND AI AGENT[/bold white]{' ' * 41}[bold #8B5CF6]║[/bold #8B5CF6]")
+            _console.print(f"  [bold #8B5CF6]╚{'═' * 56}╝[/bold #8B5CF6]")
+            _console.print()
+            _console.print(f"  [dim]Name[/dim]         [bold white]{name}[/bold white]")
+            _console.print(f"  [dim]Description[/dim]  {description}")
+            _console.print(f"  [dim]Agent ID[/dim]     [#06B6D4]{agent_id}[/#06B6D4]")
+            _console.print(f"  [dim]Public Key[/dim]   [dim]{pub_key}[/dim]")
+            _console.print(f"  [dim]Address[/dim]      [dim]{address}[/dim]")
+            _console.print(f"  [dim]Mode[/dim]         {mode}")
+            if webhook_url:
+                _console.print(f"  [dim]Webhook[/dim]      [bold #10B981]{webhook_url}[/bold #10B981]")
+            ngrok_tunnel = getattr(self, "ngrok_tunnel", None)
+            if ngrok_tunnel:
+                _console.print(f"  [dim]Ngrok[/dim]        [bold #10B981]{ngrok_tunnel.public_url}[/bold #10B981]")
+            elif self.agent_config.use_ngrok:
+                _console.print(f"  [dim]Ngrok[/dim]        [yellow]Configured (not connected)[/yellow]")
+            _console.print(f"  [dim]Price[/dim]        {price}")
+            _console.print()
+        else:
+            border = "=" * 60
+            print(f"\n{border}")
+            print(f"  ZYND AI AGENT")
+            print(f"{border}")
+            print(f"  Name        : {name}")
+            print(f"  Description : {description}")
+            print(f"  Agent ID    : {agent_id}")
+            print(f"  Public Key  : {pub_key}")
+            print(f"  Address     : {address}")
+            print(f"  Mode        : {mode}")
+            if webhook_url:
+                print(f"  Webhook URL : {webhook_url}")
+            ngrok_tunnel = getattr(self, "ngrok_tunnel", None)
+            if ngrok_tunnel:
+                print(f"  Ngrok       : Active ({ngrok_tunnel.public_url})")
+            elif self.agent_config.use_ngrok:
+                print(f"  Ngrok       : Configured (not connected)")
+            print(f"  Price       : {price}")
+            print(f"{border}\n")
