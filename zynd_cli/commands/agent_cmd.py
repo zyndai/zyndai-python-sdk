@@ -1,6 +1,7 @@
-"""zynd agent — Agent project scaffolding and registration."""
+"""zynd agent — Agent project scaffolding, registration, and updates."""
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -13,8 +14,10 @@ from zyndai_agent.ed25519_identity import (
     derive_agent_keypair,
     create_derivation_proof,
     generate_agent_id,
+    sign as ed25519_sign,
 )
-from zyndai_agent.dns_registry import register_agent, get_agent
+from zyndai_agent.dns_registry import register_agent, get_agent, update_agent
+from zyndai_agent.agent_card import build_agent_card, sign_agent_card
 from zynd_cli.config import (
     developer_key_path,
     agents_dir,
@@ -43,6 +46,11 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
     reg_p.add_argument("--agent-url", help="Override agent URL for registration")
     reg_p.set_defaults(func=_agent_register)
 
+    # zynd agent update
+    upd_p = sub.add_parser("update", help="Push config & codebase changes to registry")
+    upd_p.add_argument("--config", default="agent.config.json", help="Path to agent.config.json")
+    upd_p.set_defaults(func=_agent_update)
+
     # zynd agent run
     run_p = sub.add_parser("run", help="Run the agent from current directory")
     run_p.add_argument("--port", type=int, help="Override webhook port")
@@ -52,11 +60,12 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
 
 
 def _agent_help(args: argparse.Namespace):
-    print("Usage: zynd agent {init,register,run}")
+    print("Usage: zynd agent {init,register,update,run}")
     print()
     print("Commands:")
     print("  init       Create a new agent project (interactive wizard)")
     print("  register   Register agent on the AgentDNS network")
+    print("  update     Push config & codebase changes to registry")
     print("  run        Run the agent from current directory")
 
 
@@ -294,6 +303,146 @@ def _agent_register(args: argparse.Namespace):
     except Exception as e:
         print(f"Registration failed: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def _agent_update(args: argparse.Namespace):
+    """Push config and codebase changes to the registry."""
+
+    config_path = args.config
+    if not os.path.exists(config_path):
+        print(f"Error: {config_path} not found.", file=sys.stderr)
+        print("Run 'zynd agent init' first.")
+        sys.exit(1)
+
+    with open(config_path, "r") as f:
+        config = json.load(f)
+
+    keypair_path = config.get("keypair_path")
+    if not keypair_path or not os.path.exists(keypair_path):
+        print(f"Error: Agent keypair not found at {keypair_path}", file=sys.stderr)
+        sys.exit(1)
+
+    kp = load_keypair(keypair_path)
+    registry_url = get_registry_url(getattr(args, "registry", None)) or config.get("registry_url", "http://localhost:8080")
+
+    from rich.console import Console
+    console = Console()
+
+    # Check if agent is registered
+    console.print(f"  [dim]Checking registry...[/dim]")
+    existing = get_agent(registry_url, kp.agent_id)
+    if not existing:
+        console.print(f"  [bold red]✗[/bold red] Agent not registered. Run 'zynd agent register' first.")
+        sys.exit(1)
+
+    # Compute codebase hash (SHA-256 of all source files in current directory)
+    console.print(f"  [dim]Computing codebase hash...[/dim]")
+    codebase_hash = _compute_codebase_hash(".")
+    console.print(f"  [dim]Hash:[/dim] {codebase_hash[:16]}...")
+
+    # Build update payload from config
+    agent_url = config.get("agent_url", f"http://localhost:{config.get('webhook_port', 5001)}")
+
+    # Build signable update body
+    update_body = {
+        "agent_url": agent_url,
+        "category": config.get("category", "general"),
+        "tags": config.get("tags", []),
+        "summary": config.get("summary", ""),
+        "codebase_hash": codebase_hash,
+    }
+
+    # Sign the update body
+    signable_bytes = json.dumps(update_body, sort_keys=True, separators=(",", ":")).encode()
+    signature = ed25519_sign(kp.private_key, signable_bytes)
+    update_body["signature"] = signature
+
+    # Push to registry
+    console.print(f"  [dim]Pushing update to registry...[/dim]")
+    success = update_agent(registry_url, kp.agent_id, kp, update_body)
+
+    if success:
+        console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent updated on registry")
+        console.print(f"  [dim]Agent ID:[/dim]      {kp.agent_id}")
+        console.print(f"  [dim]Category:[/dim]      {config.get('category', 'general')}")
+        console.print(f"  [dim]Tags:[/dim]          {', '.join(config.get('tags', []))}")
+        console.print(f"  [dim]Codebase hash:[/dim] {codebase_hash[:16]}...")
+
+        # Rebuild .well-known/agent.json
+        _rebuild_agent_card(config, kp, codebase_hash)
+        console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] .well-known/agent.json rebuilt")
+    else:
+        console.print(f"  [bold red]✗[/bold red] Update failed")
+        sys.exit(1)
+
+
+def _compute_codebase_hash(root_dir: str) -> str:
+    """Compute SHA-256 hash of all source files in the agent's directory.
+
+    Includes: .py, .json (except agent.config.json), .toml, .yaml, .yml, .txt
+    Excludes: .env, __pycache__, .git, node_modules, .well-known, .agent*
+    """
+    hasher = hashlib.sha256()
+    root = Path(root_dir).resolve()
+
+    skip_dirs = {"__pycache__", ".git", "node_modules", ".well-known", ".venv", "venv", ".agent"}
+    skip_files = {".env", "agent.config.json"}
+    source_exts = {".py", ".json", ".toml", ".yaml", ".yml", ".txt", ".md", ".cfg"}
+
+    file_hashes = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Skip hidden dirs and excluded dirs
+        dirnames[:] = [d for d in dirnames if d not in skip_dirs and not d.startswith(".agent")]
+
+        rel_dir = Path(dirpath).relative_to(root)
+        for fname in sorted(filenames):
+            if fname in skip_files:
+                continue
+            if fname.startswith("."):
+                continue
+            ext = Path(fname).suffix.lower()
+            if ext not in source_exts:
+                continue
+
+            fpath = Path(dirpath) / fname
+            rel_path = rel_dir / fname
+            try:
+                content = fpath.read_bytes()
+                file_hash = hashlib.sha256(content).hexdigest()
+                file_hashes.append(f"{rel_path}:{file_hash}")
+            except (OSError, PermissionError):
+                continue
+
+    # Sort for deterministic order, then hash the combined list
+    file_hashes.sort()
+    combined = "\n".join(file_hashes).encode()
+    return hashlib.sha256(combined).hexdigest()
+
+
+def _rebuild_agent_card(config: dict, kp, codebase_hash: str):
+    """Rebuild .well-known/agent.json from config with codebase hash."""
+    import time
+
+    card = {
+        "agent_id": kp.agent_id,
+        "public_key": kp.public_key_string,
+        "name": config.get("name", ""),
+        "description": config.get("description", ""),
+        "version": "1.0",
+        "category": config.get("category", "general"),
+        "tags": config.get("tags", []),
+        "summary": config.get("summary", ""),
+        "codebase_hash": codebase_hash,
+        "status": "offline",
+        "signed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+    # Sign the card
+    signed_card = sign_agent_card(card, kp)
+
+    os.makedirs(".well-known", exist_ok=True)
+    with open(".well-known/agent.json", "w") as f:
+        json.dump(signed_card, f, indent=2)
 
 
 def _agent_run(args: argparse.Namespace):
