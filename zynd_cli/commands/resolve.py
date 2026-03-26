@@ -29,7 +29,6 @@ def run(args: argparse.Namespace):
 
     print(f"Agent: {result.get('name', '?')}")
     print(f"  ID:         {result.get('agent_id', '?')}")
-    print(f"  URL:        {result.get('agent_url', '?')}")
     print(f"  Category:   {result.get('category', '?')}")
     print(f"  Public key: {result.get('public_key', '?')}")
     status = result.get("status")

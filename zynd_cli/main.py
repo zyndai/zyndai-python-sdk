@@ -8,7 +8,6 @@ from zynd_cli.commands import (
     agent_cmd,
     auth,
     init_cmd,
-    register,
     search,
     resolve,
     card,
@@ -36,11 +35,10 @@ def main():
 
     subparsers = parser.add_subparsers(dest="command")
 
-    # Register all subcommands — each gets --registry via parents
+    # Register all subcommands
     agent_cmd.register_parser(subparsers, parents=[_registry_parent])
     auth.register_parser(subparsers)
     init_cmd.register_parser(subparsers)
-    register.register_parser(subparsers, parents=[_registry_parent])
     search.register_parser(subparsers, parents=[_registry_parent])
     resolve.register_parser(subparsers, parents=[_registry_parent])
     card.register_parser(subparsers, parents=[_registry_parent])
