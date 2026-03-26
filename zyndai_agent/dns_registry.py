@@ -107,9 +107,13 @@ def update_agent(
     """
     Update an agent's registration.
     PUT /v1/agents/{agent_id} with Authorization: Bearer ed25519:<sig>
+
+    The server verifies the Bearer signature against the request body bytes.
     """
-    # Sign the agent_id as auth token
-    auth_sig = sign(keypair.private_key, agent_id.encode())
+    # Serialize body first so we can sign the exact bytes the server will verify
+    body_bytes = json.dumps(updates, sort_keys=True, separators=(",", ":")).encode()
+    auth_sig = sign(keypair.private_key, body_bytes)
+
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {auth_sig}",
@@ -118,7 +122,7 @@ def update_agent(
     try:
         resp = requests.put(
             f"{registry_url}/v1/agents/{agent_id}",
-            json=updates,
+            data=body_bytes,  # send raw bytes to match what we signed
             headers=headers,
         )
         if resp.status_code == 200:
