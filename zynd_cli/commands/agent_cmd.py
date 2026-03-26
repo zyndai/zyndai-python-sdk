@@ -17,7 +17,6 @@ from zyndai_agent.ed25519_identity import (
     sign as ed25519_sign,
 )
 from zyndai_agent.dns_registry import register_agent, get_agent, update_agent
-from zyndai_agent.agent_card import build_agent_card, sign_agent_card
 from zynd_cli.config import (
     developer_key_path,
     agents_dir,
@@ -367,10 +366,8 @@ def _agent_update(args: argparse.Namespace):
         console.print(f"  [dim]Category:[/dim]      {config.get('category', 'general')}")
         console.print(f"  [dim]Tags:[/dim]          {', '.join(config.get('tags', []))}")
         console.print(f"  [dim]Codebase hash:[/dim] {codebase_hash[:16]}...")
-
-        # Rebuild .well-known/agent.json
-        _rebuild_agent_card(config, kp, codebase_hash)
-        console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] .well-known/agent.json rebuilt")
+        console.print()
+        console.print(f"  [dim].well-known/agent.json is managed by the SDK at runtime.[/dim]")
     else:
         console.print(f"  [bold red]✗[/bold red] Update failed")
         sys.exit(1)
@@ -419,30 +416,6 @@ def _compute_codebase_hash(root_dir: str) -> str:
     return hashlib.sha256(combined).hexdigest()
 
 
-def _rebuild_agent_card(config: dict, kp, codebase_hash: str):
-    """Rebuild .well-known/agent.json from config with codebase hash."""
-    import time
-
-    card = {
-        "agent_id": kp.agent_id,
-        "public_key": kp.public_key_string,
-        "name": config.get("name", ""),
-        "description": config.get("description", ""),
-        "version": "1.0",
-        "category": config.get("category", "general"),
-        "tags": config.get("tags", []),
-        "summary": config.get("summary", ""),
-        "codebase_hash": codebase_hash,
-        "status": "offline",
-        "signed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    }
-
-    # Sign the card
-    signed_card = sign_agent_card(card, kp)
-
-    os.makedirs(".well-known", exist_ok=True)
-    with open(".well-known/agent.json", "w") as f:
-        json.dump(signed_card, f, indent=2)
 
 
 def _agent_run(args: argparse.Namespace):
