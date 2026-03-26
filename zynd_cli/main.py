@@ -7,6 +7,7 @@ from zynd_cli import __version__
 from zynd_cli.commands import (
     agent_cmd,
     auth,
+    info,
     init_cmd,
     search,
     resolve,
@@ -38,6 +39,7 @@ def main():
     # Register all subcommands
     agent_cmd.register_parser(subparsers, parents=[_registry_parent])
     auth.register_parser(subparsers)
+    info.register_parser(subparsers, parents=[_registry_parent])
     init_cmd.register_parser(subparsers)
     search.register_parser(subparsers, parents=[_registry_parent])
     resolve.register_parser(subparsers, parents=[_registry_parent])
