@@ -66,7 +66,6 @@ def run(args: argparse.Namespace):
         agent_id = agent.get("agent_id", "?")
         name = agent.get("name", "?")
         category = agent.get("category", "?")
-        url = agent.get("agent_url", "?")
         status = agent.get("status", "")
         score = agent.get("score", 0)
         summary = agent.get("summary", "")
@@ -77,7 +76,6 @@ def run(args: argparse.Namespace):
         print(f"  {name}{status_label}")
         print(f"    ID:       {agent_id}")
         print(f"    Category: {category}")
-        print(f"    URL:      {url}")
         if tags:
             print(f"    Tags:     {', '.join(tags)}")
         if summary:
