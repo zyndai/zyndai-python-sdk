@@ -168,16 +168,36 @@ def search_agents(
     languages: Optional[List[str]] = None,
     models: Optional[List[str]] = None,
     min_trust_score: Optional[float] = None,
+    status: Optional[str] = None,
+    developer_id: Optional[str] = None,
     max_results: int = 10,
+    offset: int = 0,
     federated: bool = False,
     enrich: bool = False,
+    timeout_ms: Optional[int] = None,
 ) -> dict:
     """
-    Search for agents via POST /v1/search with SearchRequest body.
-    Matches models/search.go:4-21.
+    Search for agents via POST /v1/search.
+
+    Supports all SearchRequest filters from the registry API:
+    - query: Free-text search
+    - category: Filter by category
+    - tags: Filter by tags
+    - skills: Filter by capability skills (e.g., ["code-review"])
+    - protocols: Filter by protocols (e.g., ["a2a", "mcp"])
+    - languages: Filter by languages (e.g., ["python"])
+    - models: Filter by AI models (e.g., ["gpt-4"])
+    - min_trust_score: Minimum trust score (0.0-1.0)
+    - status: Filter by status ("active", "inactive", "any")
+    - developer_id: Filter by developer
+    - max_results: Maximum results to return
+    - offset: Pagination offset
+    - federated: Search across federated peers
+    - enrich: Include full Agent Card in results
+    - timeout_ms: Federated search timeout
 
     Returns:
-        dict with keys: results (list), total_found (int), has_more (bool)
+        dict with keys: results, total_found, offset, has_more, search_stats
     """
     body = {}
 
@@ -197,6 +217,14 @@ def search_agents(
         body["models"] = models
     if min_trust_score is not None:
         body["min_trust_score"] = min_trust_score
+    if status:
+        body["status"] = status
+    if developer_id:
+        body["developer_id"] = developer_id
+    if offset:
+        body["offset"] = offset
+    if timeout_ms is not None:
+        body["timeout_ms"] = timeout_ms
     body["max_results"] = max_results
     body["federated"] = federated
     body["enrich"] = enrich
@@ -229,6 +257,75 @@ def get_agent_card(registry_url: str, agent_id: str) -> Optional[dict]:
         if resp.status_code == 200:
             return resp.json()
         logger.error(f"Failed to get agent card for {agent_id}: {resp.status_code}")
+        return None
+    except requests.RequestException as e:
+        logger.error(f"Request failed: {e}")
+        return None
+
+
+def get_categories(registry_url: str) -> List[str]:
+    """
+    Get all available agent categories.
+    GET /v1/categories
+    """
+    try:
+        resp = requests.get(f"{registry_url}/v1/categories")
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("categories", [])
+        logger.error(f"Failed to get categories: {resp.status_code}")
+        return []
+    except requests.RequestException as e:
+        logger.error(f"Request failed: {e}")
+        return []
+
+
+def get_tags(registry_url: str) -> List[str]:
+    """
+    Get popular agent tags.
+    GET /v1/tags
+    """
+    try:
+        resp = requests.get(f"{registry_url}/v1/tags")
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("tags", [])
+        logger.error(f"Failed to get tags: {resp.status_code}")
+        return []
+    except requests.RequestException as e:
+        logger.error(f"Request failed: {e}")
+        return []
+
+
+def get_registry_info(registry_url: str) -> Optional[dict]:
+    """
+    Get registry discovery info.
+    GET /v1/info
+
+    Returns:
+        dict with keys: registry_id, name, developer_onboarding (mode, auth_url)
+    """
+    try:
+        resp = requests.get(f"{registry_url}/v1/info", timeout=10)
+        if resp.status_code == 200:
+            return resp.json()
+        logger.error(f"Failed to get registry info: {resp.status_code}")
+        return None
+    except requests.RequestException as e:
+        logger.error(f"Request failed: {e}")
+        return None
+
+
+def get_network_status(registry_url: str) -> Optional[dict]:
+    """
+    Get registry node status.
+    GET /v1/network/status
+    """
+    try:
+        resp = requests.get(f"{registry_url}/v1/network/status", timeout=10)
+        if resp.status_code == 200:
+            return resp.json()
+        logger.error(f"Failed to get network status: {resp.status_code}")
         return None
     except requests.RequestException as e:
         logger.error(f"Request failed: {e}")

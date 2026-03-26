@@ -4,13 +4,12 @@ import argparse
 import json
 import sys
 
-import requests
-
+from zyndai_agent.dns_registry import get_network_status, get_registry_info
 from zynd_cli.config import get_registry_url
 
 
 def register_parser(subparsers: argparse._SubParsersAction, parents=None):
-    p = subparsers.add_parser("status", help="Check registry node status")
+    p = subparsers.add_parser("status", help="Check registry node status", parents=parents or [])
     p.add_argument("--json", dest="output_json", action="store_true", help="Output as JSON")
     p.set_defaults(func=run)
 
@@ -18,19 +17,16 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
 def run(args: argparse.Namespace):
     registry_url = get_registry_url(getattr(args, "registry", None))
 
-    try:
-        resp = requests.get(f"{registry_url}/v1/network/status", timeout=10)
-    except requests.RequestException as e:
-        print(f"Error: Could not reach registry at {registry_url}: {e}", file=sys.stderr)
+    data = get_network_status(registry_url)
+    if data is None:
+        print(f"Error: Could not reach registry at {registry_url}", file=sys.stderr)
         sys.exit(1)
-
-    if resp.status_code != 200:
-        print(f"Error: Registry returned status {resp.status_code}", file=sys.stderr)
-        sys.exit(1)
-
-    data = resp.json()
 
     if args.output_json:
+        # Include registry info in JSON output
+        info = get_registry_info(registry_url)
+        if info:
+            data["registry_info"] = info
         print(json.dumps(data, indent=2))
         return
 

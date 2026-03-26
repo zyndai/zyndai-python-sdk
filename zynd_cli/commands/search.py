@@ -12,8 +12,17 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
     p.add_argument("query", nargs="?", help="Search query")
     p.add_argument("--category", help="Filter by category")
     p.add_argument("--tags", nargs="*", help="Filter by tags")
+    p.add_argument("--skills", nargs="*", help="Filter by skills (e.g., code-review)")
+    p.add_argument("--protocols", nargs="*", help="Filter by protocols (e.g., a2a, mcp)")
+    p.add_argument("--languages", nargs="*", help="Filter by languages (e.g., python)")
+    p.add_argument("--models", nargs="*", help="Filter by AI models (e.g., gpt-4)")
+    p.add_argument("--status", choices=["active", "inactive", "any"], help="Filter by status")
+    p.add_argument("--developer", dest="developer_id", help="Filter by developer ID")
+    p.add_argument("--min-trust", type=float, dest="min_trust_score", help="Minimum trust score (0.0-1.0)")
     p.add_argument("--max-results", type=int, default=10, help="Max results (default: 10)")
+    p.add_argument("--offset", type=int, default=0, help="Pagination offset")
     p.add_argument("--federated", action="store_true", help="Search across federated nodes")
+    p.add_argument("--enrich", action="store_true", help="Include full Agent Card in results")
     p.add_argument("--json", dest="output_json", action="store_true", help="Output as JSON")
     p.set_defaults(func=run)
 
@@ -26,8 +35,17 @@ def run(args: argparse.Namespace):
         query=args.query,
         category=args.category,
         tags=args.tags,
+        skills=getattr(args, "skills", None),
+        protocols=getattr(args, "protocols", None),
+        languages=getattr(args, "languages", None),
+        models=getattr(args, "models", None),
+        min_trust_score=getattr(args, "min_trust_score", None),
+        status=getattr(args, "status", None),
+        developer_id=getattr(args, "developer_id", None),
         max_results=args.max_results,
+        offset=getattr(args, "offset", 0),
         federated=args.federated,
+        enrich=getattr(args, "enrich", False),
     )
 
     if args.output_json:
@@ -36,6 +54,8 @@ def run(args: argparse.Namespace):
 
     agents = result.get("results", [])
     total = result.get("total_found", len(agents))
+    offset = result.get("offset", 0)
+    has_more = result.get("has_more", False)
 
     if not agents:
         print("No agents found.")
@@ -48,9 +68,41 @@ def run(args: argparse.Namespace):
         category = agent.get("category", "?")
         url = agent.get("agent_url", "?")
         status = agent.get("status", "")
+        score = agent.get("score", 0)
+        summary = agent.get("summary", "")
+        dev_id = agent.get("developer_id", "")
+        tags = agent.get("tags", [])
+
         status_label = f"  [{status}]" if status else ""
         print(f"  {name}{status_label}")
         print(f"    ID:       {agent_id}")
         print(f"    Category: {category}")
         print(f"    URL:      {url}")
+        if tags:
+            print(f"    Tags:     {', '.join(tags)}")
+        if summary:
+            print(f"    Summary:  {summary}")
+        if dev_id:
+            print(f"    Developer: {dev_id}")
+        if score:
+            print(f"    Score:    {score:.4f}")
         print()
+
+    if has_more:
+        next_offset = offset + len(agents)
+        print(f"  More results available. Use --offset {next_offset} to see next page.")
+
+    # Show search stats if available
+    stats = result.get("search_stats")
+    if stats:
+        parts = []
+        if stats.get("local_results"):
+            parts.append(f"local:{stats['local_results']}")
+        if stats.get("gossip_results"):
+            parts.append(f"gossip:{stats['gossip_results']}")
+        if stats.get("federated_results"):
+            parts.append(f"federated:{stats['federated_results']}")
+        if stats.get("peers_queried"):
+            parts.append(f"peers:{stats['peers_queried']}")
+        if parts:
+            print(f"  [{' | '.join(parts)}]")
