@@ -26,6 +26,8 @@ def register_agent(
     capability_summary: Optional[dict] = None,
     developer_id: Optional[str] = None,
     developer_proof: Optional[dict] = None,
+    agent_name: Optional[str] = None,
+    version: Optional[str] = None,
 ) -> str:
     """
     Register an agent on the agent-dns mesh.
@@ -65,6 +67,10 @@ def register_agent(
         body["developer_id"] = developer_id
     if developer_proof:
         body["developer_proof"] = developer_proof
+    if agent_name:
+        body["agent_name"] = agent_name
+    if version:
+        body["version"] = version
 
     resp = requests.post(
         f"{registry_url}/v1/agents",
@@ -80,6 +86,55 @@ def register_agent(
 
     data = resp.json()
     return data.get("agent_id", keypair.agent_id)
+
+
+def check_handle_available(registry_url: str, handle: str) -> dict:
+    """
+    Check if a developer handle/username is available on the registry.
+    GET /v1/handles/{handle}/available
+
+    Returns:
+        dict with keys: handle, available (bool), reason (optional)
+    """
+    try:
+        resp = requests.get(f"{registry_url}/v1/handles/{handle}/available")
+        if resp.status_code == 200:
+            return resp.json()
+        return {"handle": handle, "available": False, "reason": f"HTTP {resp.status_code}"}
+    except requests.RequestException as e:
+        return {"handle": handle, "available": False, "reason": str(e)}
+
+
+def check_agent_name_available(
+    registry_url: str, developer_handle: str, agent_name: str
+) -> dict:
+    """
+    Check if an agent name is available under a developer handle.
+    GET /v1/names/{developer}/{agent}/available
+
+    Returns:
+        dict with keys: developer, agent_name, available (bool), reason (optional),
+                        existing_agent_id (optional)
+    """
+    try:
+        resp = requests.get(
+            f"{registry_url}/v1/names/{developer_handle}/{agent_name}/available"
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        return {
+            "developer": developer_handle,
+            "agent_name": agent_name,
+            "available": False,
+            "reason": f"HTTP {resp.status_code}",
+        }
+    except requests.RequestException as e:
+        return {
+            "developer": developer_handle,
+            "agent_name": agent_name,
+            "available": False,
+            "reason": str(e),
+        }
 
 
 def get_agent(registry_url: str, agent_id: str) -> Optional[dict]:

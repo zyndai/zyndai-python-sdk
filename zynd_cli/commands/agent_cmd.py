@@ -16,7 +16,12 @@ from zyndai_agent.ed25519_identity import (
     generate_agent_id,
     sign as ed25519_sign,
 )
-from zyndai_agent.dns_registry import register_agent, get_agent, update_agent
+from zyndai_agent.dns_registry import (
+    register_agent,
+    get_agent,
+    update_agent,
+    check_agent_name_available,
+)
 from zynd_cli.config import (
     developer_key_path,
     agents_dir,
@@ -159,10 +164,21 @@ def _agent_init(args: argparse.Namespace):
             console.print("  [dim]Aborted.[/dim]")
             return
 
+    # 5b. Derive agent_name (ZNS identifier) from the agent name
+    # Lowercase, replace spaces/underscores with hyphens, strip non-alphanumeric
+    import re
+    agent_name_zns = re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-").replace("_", "-"))
+    agent_name_zns = re.sub(r"-+", "-", agent_name_zns).strip("-")
+    if len(agent_name_zns) < 3:
+        agent_name_zns = agent_name_zns + "-agent"
+
+    console.print(f"  [bold #8B5CF6]\u2713[/bold #8B5CF6] Agent name (ZNS): [bold]{agent_name_zns}[/bold]")
+
     # 6. Create agent.config.json
     registry_url = get_registry_url(getattr(args, "registry", None))
     config = {
         "name": name,
+        "agent_name": agent_name_zns,
         "framework": framework,
         "description": f"{name} agent",
         "category": "general",
@@ -282,6 +298,45 @@ def _agent_register(args: argparse.Namespace):
 
     agent_url = args.agent_url or config.get("agent_url", f"http://localhost:{config.get('webhook_port', 5000)}")
 
+    # Check agent name availability before registering (if agent_name is in config)
+    agent_name_zns = config.get("agent_name")
+    if agent_name_zns:
+        # We need the developer's handle to check. Load it from the registry.
+        # The developer handle is stored on the registry, so we check via the names API.
+        print(f"Checking if agent name '{agent_name_zns}' is available...")
+        # We need the developer handle — try to derive it from developer info on the registry
+        # For now, use the dev_id to look up. The availability check uses the handle,
+        # but we may not have it locally. Try to check via the registry API.
+        try:
+            # Try to get developer info to find the handle
+            import requests as _req
+            dev_resp = _req.get(f"{registry_url}/v1/developers/{dev_id}")
+            if dev_resp.status_code == 200:
+                dev_info = dev_resp.json()
+                dev_handle = dev_info.get("dev_handle", "")
+                if dev_handle:
+                    avail = check_agent_name_available(registry_url, dev_handle, agent_name_zns)
+                    if not avail.get("available", True):
+                        existing_id = avail.get("existing_agent_id", "")
+                        # Only fail if the existing agent has a different key
+                        if existing_id and existing_id != kp.agent_id:
+                            print(f"\nError: Agent name '{agent_name_zns}' is already taken under '{dev_handle}'.", file=sys.stderr)
+                            print(f"  Existing agent: {existing_id}", file=sys.stderr)
+                            print(f"  Choose a different agent_name in agent.config.json.", file=sys.stderr)
+                            sys.exit(1)
+                        elif not existing_id:
+                            reason = avail.get("reason", "already taken")
+                            print(f"\nError: Agent name '{agent_name_zns}' is not available: {reason}", file=sys.stderr)
+                            print(f"  Update agent_name in agent.config.json.", file=sys.stderr)
+                            sys.exit(1)
+                    else:
+                        print(f"  Agent name '{agent_name_zns}' is available.")
+                else:
+                    print(f"  Warning: Developer has no handle claimed. Agent name binding will be skipped.")
+                    agent_name_zns = None
+        except Exception as e:
+            print(f"  Warning: Could not check agent name availability: {e}")
+
     print(f"Registering agent on the network...")
     try:
         agent_id = register_agent(
@@ -294,10 +349,13 @@ def _agent_register(args: argparse.Namespace):
             summary=config.get("summary", ""),
             developer_id=dev_id,
             developer_proof=proof,
+            agent_name=agent_name_zns,
         )
         print(f"\nAgent registered!")
         print(f"  Agent ID: {agent_id}")
         print(f"  Name:     {config['name']}")
+        if agent_name_zns:
+            print(f"  ZNS Name: {agent_name_zns}")
         print(f"  URL:      {agent_url}")
     except Exception as e:
         print(f"Registration failed: {e}", file=sys.stderr)
