@@ -1,0 +1,13 @@
+{
+  "name": "swapnil-tes",
+  "framework": "langchain",
+  "description": "swapnil-tes agent is a personal assistant designed to help with various tasks and provide information on demand.",
+  "category": "general",
+  "tags": ["personal"],
+  "summary": "swapnil tes agent is a personal assistant designed to help with various tasks and provide information on demand.",
+  "webhook_port": 5001,
+  "registry_url": "http://0.0.0.0:8080",
+  "keypair_path": "/Users/swapnilshinde/.zynd/agents/swapnil-tes/keypair.json",
+  "agent_index": 0,
+  "auto_register": true
+}

@@ -1,16 +1,42 @@
 # ZyndAI Agent SDK
 
-A powerful Python SDK that enables AI agents to communicate securely and discover each other on the ZyndAI Network. Built with **HTTP webhooks**, **identity verification**, **agent discovery**, and **x402 micropayments** at its core.
+A Python SDK for building AI agents on the ZyndAI Network. Provides **Ed25519 identity**, **decentralized agent registry**, **Agent Cards**, **WebSocket heartbeat liveness**, **HTTP webhooks**, **x402 micropayments**, and **multi-framework support** (LangChain, LangGraph, CrewAI, PydanticAI, custom).
 
-## Features
+## Architecture
 
-- **Auto-Provisioning**: Agents are automatically created and registered on first run
-- **Smart Agent Discovery**: Search and discover agents using semantic keyword matching
-- **HTTP Webhook Communication**: Async and sync request/response patterns with embedded Flask server
-- **Ngrok Tunnel Support**: Expose local agents to the internet with one config flag
-- **x402 Micropayments**: Built-in support for pay-per-use API endpoints
-- **Multi-Framework Support**: Works with LangChain, LangGraph, CrewAI, and PydanticAI
-- **Decentralized Identity**: Secure agent identity via Polygon ID credentials
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        ZyndAIAgent                              │
+│  ┌──────────────┐ ┌──────────────┐ ┌────────────────────────┐  │
+│  │  Ed25519      │ │  Agent Card  │ │  WebSocket Heartbeat   │  │
+│  │  Identity     │ │  (.well-known│ │  (30s signed pings)    │  │
+│  │              │ │  /agent.json)│ │                        │  │
+│  └──────┬───────┘ └──────┬───────┘ └───────────┬────────────┘  │
+│         │                │                     │               │
+│  ┌──────┴───────┐ ┌──────┴───────┐ ┌──────────┴────────────┐  │
+│  │  DNS Registry │ │  x402        │ │  Webhook Server       │  │
+│  │  Client       │ │  Payments    │ │  (Flask + ngrok)      │  │
+│  └──────────────┘ └──────────────┘ └───────────────────────┘  │
+│                                                                 │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Framework Adapters                                       │  │
+│  │  LangChain │ LangGraph │ CrewAI │ PydanticAI │ Custom    │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+         │                    │                     │
+         ▼                    ▼                     ▼
+   agent-dns             Other Agents          End Users
+   Registry              (via webhooks)        (via x402)
+```
+
+**Key flows:**
+
+1. **Init** — `zynd agent init` scaffolds a project, derives an Ed25519 keypair from your developer key
+2. **Register** — `zynd agent register` registers the agent on the network with developer proof and ZNS name binding
+3. **Run** — `zynd agent run` starts the agent, writes Agent Card, begins WebSocket heartbeat
+4. **Liveness** — Background thread opens WebSocket to registry, sends signed heartbeat every 30s. Server marks agent active only after first valid signature
+5. **Discovery** — Other agents find this agent via `POST /v1/search` or FQAN resolution (`GET /v1/resolve/{developer}/{agent}`)
+6. **Communication** — Incoming requests hit Flask webhook server; outgoing requests use x402 payment middleware
 
 ## Installation
 
@@ -18,564 +44,469 @@ A powerful Python SDK that enables AI agents to communicate securely and discove
 pip install zyndai-agent
 ```
 
-With ngrok tunnel support:
+With optional extras:
+
 ```bash
-pip install zyndai-agent[ngrok]
+pip install zyndai-agent[ngrok]       # Ngrok tunnel support
+pip install zyndai-agent[heartbeat]   # WebSocket heartbeat (websockets>=14.0)
+pip install zyndai-agent[mqtt]        # Legacy MQTT communication
 ```
 
 Or install from source:
 
 ```bash
-git clone https://github.com/Zynd-AI-Network/zyndai-agent.git
+git clone https://github.com/zyndai/zyndai-agent.git
 cd zyndai-agent
-pip install -e .
+pip install -e ".[heartbeat]"
 ```
 
 ## Quick Start
 
-### 1. Get Your API Key
+### 1. Authenticate with a Registry
 
-1. Visit [zynd.ai](https://zynd.ai)
-2. Connect your wallet and create an account
-3. Get your **API Key** from the dashboard
+```bash
+pip install zyndai-agent[heartbeat]
 
-### 2. Environment Setup
-
-Create a `.env` file:
-
-```env
-ZYND_API_KEY=your_api_key_from_dashboard
-OPENAI_API_KEY=your_openai_api_key
-TAVILY_API_KEY=your_tavily_api_key  # Optional, for search
+# Login via browser-based onboarding (creates ~/.zynd/developer.json)
+zynd auth login --registry https://dns01.zynd.ai
 ```
 
-### 3. Create Your First Agent
+### 2. Create an Agent Project
 
-The SDK automatically provisions your agent identity on first run:
+```bash
+# Interactive wizard — scaffolds agent.py, agent.config.json, .env, keypair
+zynd agent init
+```
+
+This derives an Ed25519 keypair from your developer key, creates the project files, and writes `ZYND_AGENT_KEYPAIR_PATH` to `.env`.
+
+### 3. Register on the Network
+
+```bash
+# Registers agent with developer proof and ZNS name binding
+zynd agent register
+```
+
+### 4. Run Your Agent
+
+```bash
+# Starts the agent, serves Agent Card, begins heartbeat
+zynd agent run
+```
+
+On startup the SDK will:
+- Load the Ed25519 keypair from `ZYND_AGENT_KEYPAIR_PATH`
+- Write a signed `.well-known/agent.json`
+- Start a WebSocket heartbeat thread to maintain "active" status
+- Display the agent's FQAN (e.g., `dns01.zynd.ai/your-handle/your-agent`) if registered
+
+### Custom Agent Code
+
+The `agent.py` generated by `zynd agent init` reads settings from `agent.config.json`:
 
 ```python
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.message import AgentMessage
+import json, os
 from dotenv import load_dotenv
-import os
 
 load_dotenv()
 
-# Configure your agent
+_config = {}
+if os.path.exists("agent.config.json"):
+    with open("agent.config.json") as f:
+        _config = json.load(f)
+
 agent_config = AgentConfig(
-    name="My First Agent",
-    description="A helpful assistant agent",
-    capabilities={
-        "ai": ["nlp"],
-        "protocols": ["http"],
-        "services": ["general_assistance"]
-    },
-    webhook_host="0.0.0.0",
-    webhook_port=5000,
-    registry_url="https://registry.zynd.ai",
-    api_key=os.environ["ZYND_API_KEY"]
+    name=_config.get("name", "My Agent"),
+    description=_config.get("description", "A helpful assistant"),
+    category=_config.get("category", "general"),
+    tags=_config.get("tags", ["assistant"]),
+    summary=_config.get("summary", ""),
+    webhook_port=_config.get("webhook_port", 5001),
+    registry_url=os.environ.get("ZYND_REGISTRY_URL", _config.get("registry_url", "https://dns01.zynd.ai")),
+    keypair_path=os.environ.get("ZYND_AGENT_KEYPAIR_PATH", _config.get("keypair_path")),
 )
 
-# Initialize - auto-creates agent identity on first run
 agent = ZyndAIAgent(agent_config=agent_config)
-
-print(f"Agent ID: {agent.agent_id}")
-print(f"Webhook URL: {agent.webhook_url}")
-print(f"Payment Address: {agent.pay_to_address}")
-
-# Handle incoming messages
-def message_handler(message: AgentMessage, topic: str):
-    print(f"Received: {message.content}")
-    agent.set_response(message.message_id, "Hello! I received your message.")
-
-agent.add_message_handler(message_handler)
-
-# Keep running
-while True:
-    pass
 ```
+
+## Ed25519 Identity
+
+Every agent has an Ed25519 keypair. The agent ID is derived from the public key:
+
+```
+agent_id = "agdns:" + sha256(public_key_bytes).hex()[:32]
+```
+
+### Keypair Resolution (priority order)
+
+1. `ZYND_AGENT_KEYPAIR_PATH` env var — path to keypair JSON
+2. `ZYND_AGENT_PRIVATE_KEY` env var — base64-encoded private key seed
+3. `agent_config.keypair_path` — explicit path in config
+4. `.agent/config.json` — legacy auto-provisioned config
+
+### HD Key Derivation
+
+Derive multiple agent keys from a single developer identity:
+
+```bash
+zynd keys derive --index 0   # First agent
+zynd keys derive --index 1   # Second agent
+```
+
+Derivation uses `SHA-512(developer_seed || "agdns:agent:" || index_bytes)[:32]`, producing a deterministic agent seed. The developer can cryptographically prove ownership of any derived agent key.
+
+```python
+from zyndai_agent.ed25519_identity import derive_agent_keypair, create_derivation_proof
+
+agent_kp = derive_agent_keypair(developer_private_key, index=0)
+proof = create_derivation_proof(developer_kp, agent_kp.public_key, index=0)
+# proof contains: developer_public_key (ed25519:...), agent_index, developer_signature
+# The signature is over (agent_public_key_bytes || uint32_be(index)), matching the Go registry
+```
+
+### Fully Qualified Agent Names (FQANs)
+
+Agents with a developer handle and registered name get a human-readable FQAN:
+
+```
+{registry-host}/{developer-handle}/{agent-name}
+```
+
+For example: `dns01.zynd.ai/acme-corp/doc-translator`
+
+FQANs are created automatically during `zynd agent register` when the developer has a claimed handle. They can be resolved via `GET /v1/resolve/{developer}/{agent}` and appear in search results.
+
+## Agent Cards
+
+Agent Cards are self-describing JSON documents served at `/.well-known/agent.json`. They include the agent's identity, capabilities, endpoints, pricing, and a cryptographic signature.
+
+```json
+{
+  "agent_id": "agdns:8e92a6ed48e821f4...",
+  "public_key": "ed25519:35/YZpx0RizYECc12iNGF/jrhrFdSn+a2JCkk80Hy3g=",
+  "name": "Stock Analysis Agent",
+  "description": "Real-time stock comparison and analysis",
+  "version": "1.0",
+  "capabilities": [
+    {"name": "financial_analysis", "category": "ai"},
+    {"name": "http", "category": "protocols"}
+  ],
+  "endpoints": {
+    "invoke": "https://example.com/webhook/sync",
+    "invoke_async": "https://example.com/webhook",
+    "health": "https://example.com/health",
+    "agent_card": "https://example.com/.well-known/agent.json"
+  },
+  "pricing": {
+    "model": "per-request",
+    "currency": "USDC",
+    "rates": {"default": 0.01},
+    "payment_methods": ["x402"]
+  },
+  "status": "online",
+  "signed_at": "2026-03-21T22:47:20Z",
+  "signature": "ed25519:bFREYUXmXl0i8yfi..."
+}
+```
+
+The card is regenerated and re-signed on every startup. If the card content changes (name, description, capabilities, etc.), the registry is automatically updated.
+
+### Viewing Agent Cards
+
+```bash
+# From registry
+zynd card show agdns:8e92a6ed48e821f4...
+
+# From local file
+zynd card show --file .well-known/agent.json
+
+# As raw JSON
+zynd card show agdns:8e92a6ed48e821f4... --json
+```
+
+## Heartbeat & Liveness
+
+Agents maintain an "active" status on the registry via WebSocket heartbeat:
+
+```
+Agent                          Registry
+  |--- WS UPGRADE --------------->|  GET /v1/agents/{agentID}/ws
+  |<-- 101 Switching Protocols ----|
+  |                                |
+  |--- signed heartbeat ---------->|  First valid msg → "active" + gossip broadcast
+  |--- signed heartbeat ---------->|  Subsequent msgs → last_heartbeat updated
+  |         ...                    |
+  |--- (silence > 5min) --------->|  Server marks agent "inactive"
+```
+
+Each heartbeat message contains a UTC timestamp and its Ed25519 signature. The server verifies the signature against the agent's registered public key before accepting it. The agent is only marked "active" after the first valid signed message — a raw WebSocket connection alone does not change status.
+
+The SDK starts the heartbeat thread automatically on `zynd agent run`. It sends a signed message every 30 seconds and reconnects on failure. The agent must be registered via `zynd agent register` first.
+
+To install heartbeat support: `pip install zyndai-agent[heartbeat]`
 
 ## Agent Discovery
 
-Find agents using semantic keyword search:
+### Search from Code
 
 ```python
-# Search for agents by capabilities
-agents = agent.search_agents_by_capabilities(
-    capabilities=["stock comparison", "financial analysis"],
-    top_k=5
+# Semantic keyword search
+results = agent.search_agents(keyword="stock analysis", limit=5)
+
+# Filter by category and tags
+results = agent.search_agents(
+    keyword="data",
+    category="finance",
+    tags=["stocks", "crypto"],
+    federated=True,  # Search across registry mesh
+    enrich=True,     # Include full Agent Card in results
 )
 
-for found_agent in agents:
-    print(f"Name: {found_agent['name']}")
-    print(f"Description: {found_agent['description']}")
-    print(f"Webhook: {found_agent['httpWebhookUrl']}")
+for r in results:
+    print(f"{r['name']} [{r['status']}] — {r['agent_url']}")
 
-# Or search with keyword
-agents = agent.search_agents_by_keyword("stock analysis", limit=10)
+# Legacy convenience methods
+results = agent.search_agents_by_keyword("stock comparison")
+results = agent.search_agents_by_capabilities(["financial_analysis"], top_k=5)
+```
+
+### Search from CLI
+
+```bash
+# Keyword search
+zynd search "stock analysis"
+
+# Filter by category and tags
+zynd search --category finance --tags stocks crypto
+
+# Federated search (across registry mesh)
+zynd search "data pipeline" --federated
+
+# Resolve a specific agent
+zynd resolve agdns:8e92a6ed48e821f4...
 ```
 
 ## Agent-to-Agent Communication
 
-### Connect and Send Messages
+### Webhook Endpoints
+
+When your agent starts, these HTTP endpoints are available:
+
+| Endpoint | Method | Description |
+| --- | --- | --- |
+| `/webhook` | POST | Async message handler (fire-and-forget) |
+| `/webhook/sync` | POST | Sync request/response (30s timeout) |
+| `/health` | GET | Health check |
+| `/.well-known/agent.json` | GET | Signed Agent Card |
+
+### Sending Messages
 
 ```python
-# Find and connect to another agent
-agents = agent.search_agents_by_keyword("stock comparison")
-if agents:
-    target = agents[0]
-    agent.connect_agent(target)
-
-    # Send a message
-    agent.send_message("Compare AAPL and GOOGL stocks")
-```
-
-### Synchronous Request/Response
-
-For immediate responses, use the sync endpoint:
-
-```python
-import requests
 from zyndai_agent.message import AgentMessage
 
-# Create message
-message = AgentMessage(
-    content="What is the weather today?",
+# Find an agent
+agents = agent.search_agents_by_keyword("stock comparison")
+target = agents[0]
+
+# Send sync request (with automatic x402 payment if required)
+msg = AgentMessage(
+    content="Compare AAPL and GOOGL",
     sender_id=agent.agent_id,
     message_type="query",
-    sender_did=agent.identity_credential
 )
 
-# Send to sync endpoint (waits for response)
-response = requests.post(
-    "http://localhost:5001/webhook/sync",
-    json=message.to_dict(),
-    timeout=60
-)
-
-result = response.json()
-print(result["response"])
+sync_url = target['agent_url'] + "/webhook/sync"
+response = agent.x402_processor.post(sync_url, json=msg.to_dict(), timeout=60)
+print(response.json()["response"])
 ```
 
 ## x402 Micropayments
 
 ### Enable Payments on Your Agent
 
-Charge for your agent's services:
-
 ```python
 agent_config = AgentConfig(
-    name="Premium Stock Agent",
-    description="Stock analysis with real-time data",
-    capabilities={"ai": ["financial_analysis"], "protocols": ["http"]},
-    webhook_host="0.0.0.0",
+    name="Premium Agent",
     webhook_port=5001,
-    registry_url="https://registry.zynd.ai",
-    api_key=os.environ["ZYND_API_KEY"],
-    price="$0.01"  # Charge $0.01 per request
+    price="$0.01",  # Charge $0.01 per request
+    registry_url="https://dns01.zynd.ai",
 )
 
 agent = ZyndAIAgent(agent_config=agent_config)
-# x402 payment middleware is automatically enabled
+# x402 payment middleware is automatically enabled on /webhook/sync
 ```
 
 ### Pay for Other Agent Services
 
-The SDK automatically handles x402 payments:
-
 ```python
-# Use the x402 processor for paid requests
+# The x402 processor handles payment negotiation automatically
 response = agent.x402_processor.post(
-    "http://paid-agent:5001/webhook/sync",
-    json=message.to_dict()
+    "https://paid-agent.example.com/webhook/sync",
+    json=msg.to_dict()
 )
-# Payment is handled automatically!
-```
 
-### Access Paid APIs
-
-```python
-# Make requests to any x402-protected API
+# Or access any x402-protected API
 response = agent.x402_processor.get(
     "https://api.premium-data.com/stock",
     params={"symbol": "AAPL"}
 )
-print(response.json())
 ```
 
-## Ngrok Tunnel (Public Webhook URL)
+## Multi-Framework Support
 
-By default, agents bind to `localhost` which is only reachable locally. To make your agent accessible from the internet (so other agents on different machines can reach it), enable the built-in ngrok tunnel.
-
-### Setup
-
-1. Sign up at [ngrok.com](https://ngrok.com) (free) and get your auth token
-2. Install with ngrok support: `pip install zyndai-agent[ngrok]`
-
-### Usage
+The SDK wraps any AI framework behind a unified `invoke()` method:
 
 ```python
-agent_config = AgentConfig(
-    name="My Public Agent",
-    description="Accessible from anywhere",
-    capabilities={"ai": ["nlp"], "protocols": ["http"]},
-    webhook_host="0.0.0.0",
-    webhook_port=5003,
-    registry_url="https://registry.zynd.ai",
-    api_key=os.environ["ZYND_API_KEY"],
-    use_ngrok=True,
-    ngrok_auth_token="your-ngrok-auth-token",  # Or set globally via: ngrok config add-authtoken <token>
-)
+# LangChain
+from langchain_classic.agents import AgentExecutor
+agent.set_langchain_agent(executor)
 
-agent = ZyndAIAgent(agent_config=agent_config)
-# Output:
-#   Ngrok tunnel active: https://a1b2c3d4.ngrok-free.app -> localhost:5003
-#   Webhook URL: https://a1b2c3d4.ngrok-free.app/webhook
+# LangGraph
+agent.set_langgraph_agent(compiled_graph)
+
+# CrewAI
+agent.set_crewai_agent(crew)
+
+# PydanticAI
+agent.set_pydantic_ai_agent(pydantic_agent)
+
+# Custom function
+agent.set_custom_agent(lambda input_text: f"Response: {input_text}")
+
+# All use the same interface
+response = agent.invoke("What is the price of AAPL?")
 ```
 
-The public ngrok URL is automatically registered with the ZyndAI registry, so other agents can discover and reach your agent without any manual URL configuration.
+See `examples/http/` for complete working examples of each framework.
 
-If you've already configured ngrok globally (`ngrok config add-authtoken <token>`), you can omit `ngrok_auth_token`:
+## Ngrok Tunnel Support
+
+Expose local agents to the internet:
 
 ```python
 agent_config = AgentConfig(
     name="My Public Agent",
     webhook_port=5003,
-    use_ngrok=True,  # Uses globally configured ngrok token
-    ...
-)
-```
-
-### Manual Alternative
-
-If you prefer to manage ngrok yourself, start the tunnel separately and pass the URL directly:
-
-```bash
-ngrok http 5003
-```
-
-```python
-agent_config = AgentConfig(
-    name="My Public Agent",
-    webhook_port=5003,
-    webhook_url="https://a1b2c3d4.ngrok-free.app/webhook",  # Your ngrok URL + /webhook
-    ...
-)
-```
-
-## Complete Example: Stock Comparison Agents
-
-### Stock Comparison Agent (Paid Service)
-
-```python
-# stock_agent.py
-from zyndai_agent.agent import AgentConfig, ZyndAIAgent
-from zyndai_agent.message import AgentMessage
-from langchain_openai import ChatOpenAI
-from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_community.tools.tavily_search import TavilySearchResults
-import os
-
-agent_config = AgentConfig(
-    name="Stock Comparison Agent",
-    description="Professional stock comparison and financial analysis",
-    capabilities={
-        "ai": ["nlp", "financial_analysis"],
-        "protocols": ["http"],
-        "services": ["stock_comparison", "market_research"]
-    },
-    webhook_host="0.0.0.0",
-    webhook_port=5003,
-    registry_url="https://registry.zynd.ai",
-    api_key=os.environ["ZYND_API_KEY"],
-    price="$0.0001",  # Charge per request
-    config_dir=".agent-stock"  # Separate identity
-)
-
-agent = ZyndAIAgent(agent_config=agent_config)
-
-# Setup LangChain
-llm = ChatOpenAI(model="gpt-3.5-turbo")
-search = TavilySearchResults(max_results=3)
-
-prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are a stock analysis expert. Use search for current data."),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{input}"),
-    MessagesPlaceholder(variable_name="agent_scratchpad")
-])
-
-executor = AgentExecutor(
-    agent=create_tool_calling_agent(llm, [search], prompt),
-    tools=[search],
-    verbose=True
-)
-
-def handler(message: AgentMessage, topic: str):
-    result = executor.invoke({"input": message.content, "chat_history": []})
-    agent.set_response(message.message_id, result["output"])
-
-agent.add_message_handler(handler)
-
-print(f"Stock Agent running at {agent.webhook_url}")
-print(f"Price: $0.0001 per request")
-
-while True:
-    pass
-```
-
-### User Agent (Client)
-
-```python
-# user_agent.py
-from zyndai_agent.agent import AgentConfig, ZyndAIAgent
-from zyndai_agent.message import AgentMessage
-import os
-
-agent_config = AgentConfig(
-    name="User Agent",
-    description="Interactive assistant for stock research",
-    capabilities={"ai": ["nlp"], "protocols": ["http"]},
-    webhook_host="0.0.0.0",
-    webhook_port=5004,
-    registry_url="https://registry.zynd.ai",
-    api_key=os.environ["ZYND_API_KEY"],
-    config_dir=".agent-user"  # Separate identity
-)
-
-agent = ZyndAIAgent(agent_config=agent_config)
-
-# Find stock comparison agent
-agents = agent.search_agents_by_keyword("stock comparison")
-if not agents:
-    print("No stock agent found")
-    exit()
-
-target = agents[0]
-print(f"Found: {target['name']}")
-print(f"Webhook: {target['httpWebhookUrl']}")
-
-# Interactive loop
-while True:
-    question = input("\nYou: ").strip()
-    if question.lower() == "exit":
-        break
-
-    # Create message
-    msg = AgentMessage(
-        content=question,
-        sender_id=agent.agent_id,
-        message_type="query",
-        sender_did=agent.identity_credential
-    )
-
-    # Send with automatic payment via x402
-    sync_url = target['httpWebhookUrl'].replace('/webhook', '/webhook/sync')
-    response = agent.x402_processor.post(sync_url, json=msg.to_dict(), timeout=60)
-
-    if response.status_code == 200:
-        print(f"\nAgent: {response.json()['response']}")
-    else:
-        print(f"Error: {response.status_code}")
-```
-
-## Supported AI Frameworks
-
-The SDK supports multiple AI agent frameworks with a unified `invoke()` method:
-
-### LangChain
-
-```python
-from zyndai_agent.agent import ZyndAIAgent
-from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
-
-agent_executor = AgentExecutor(agent=..., tools=[...])
-zynd_agent.set_langchain_agent(agent_executor)
-
-# Use unified invoke
-response = zynd_agent.invoke("Compare AAPL and GOOGL")
-```
-
-### LangGraph
-
-```python
-from langgraph.graph import StateGraph, MessagesState
-
-graph = StateGraph(MessagesState)
-# ... build graph ...
-compiled = graph.compile()
-
-zynd_agent.set_langgraph_agent(compiled)
-response = zynd_agent.invoke("Analyze market trends")
-```
-
-### CrewAI
-
-```python
-from crewai import Agent, Task, Crew
-
-crew = Crew(agents=[...], tasks=[...])
-zynd_agent.set_crewai_agent(crew)
-
-response = zynd_agent.invoke("Research stock performance")
-```
-
-### PydanticAI
-
-```python
-from pydantic_ai import Agent
-
-pydantic_agent = Agent(model="openai:gpt-4")
-zynd_agent.set_pydantic_ai_agent(pydantic_agent)
-
-response = zynd_agent.invoke("What is the current price of TSLA?")
-```
-
-### Custom Agent
-
-```python
-def my_agent(input_text: str) -> str:
-    return f"Processed: {input_text}"
-
-zynd_agent.set_custom_agent(my_agent)
-response = zynd_agent.invoke("Hello")
-```
-
-See `examples/http/` for complete examples of each framework.
-
-## Configuration Options
-
-| Parameter          | Type   | Description                                              |
-| ------------------ | ------ | -------------------------------------------------------- |
-| `name`             | `str`  | Agent display name                                       |
-| `description`      | `str`  | Agent description (used for discovery)                   |
-| `capabilities`     | `dict` | Agent capabilities for semantic search                   |
-| `webhook_host`     | `str`  | Host to bind webhook server (default: "0.0.0.0")        |
-| `webhook_port`     | `int`  | Port for webhook server (default: 5000)                  |
-| `webhook_url`      | `str`  | Public URL if behind NAT (auto-generated if None)        |
-| `api_key`          | `str`  | ZyndAI API key (required)                                |
-| `registry_url`     | `str`  | Registry URL (default: "https://registry.zynd.ai")       |
-| `price`            | `str`  | Price per request for x402 (e.g., "$0.01")               |
-| `config_dir`       | `str`  | Custom config directory for agent identity                |
-| `use_ngrok`        | `bool` | Auto-create ngrok tunnel for public URL (default: False) |
-| `ngrok_auth_token` | `str`  | Ngrok auth token (optional if globally configured)       |
-
-## Webhook Endpoints
-
-When your agent starts, these endpoints are available:
-
-| Endpoint        | Method | Description                               |
-| --------------- | ------ | ----------------------------------------- |
-| `/webhook`      | POST   | Async message reception (fire-and-forget) |
-| `/webhook/sync` | POST   | Sync message with response (30s timeout)  |
-| `/health`       | GET    | Health check                              |
-
-## Multiple Agents
-
-Run multiple agents by using different `config_dir` values and ports:
-
-```python
-# Agent 1
-agent1_config = AgentConfig(
-    name="Agent 1",
-    webhook_port=5001,
-    config_dir=".agent-1",
-    ...
-)
-
-# Agent 2
-agent2_config = AgentConfig(
-    name="Agent 2",
-    webhook_port=5002,
-    config_dir=".agent-2",
-    ...
-)
-```
-
-### Running Multiple Agents with Ngrok on the Same Machine
-
-You can run 3 (or more) agents on the same PC, each on a different port, each with its own ngrok tunnel. The SDK handles this automatically -- just set `use_ngrok=True` on each agent:
-
-```bash
-# Install with ngrok support
-pip install zyndai-agent[ngrok]
-```
-
-```bash
-# Add your ngrok auth token to .env
-NGROK_AUTH_TOKEN=your-ngrok-auth-token
-```
-
-```python
-# agent_1.py - LangChain stock agent on port 5003
-agent1_config = AgentConfig(
-    name="Stock Agent (LangChain)",
-    webhook_port=5003,
-    config_dir=".agent-langchain",
     use_ngrok=True,
-    ngrok_auth_token=os.environ.get("NGROK_AUTH_TOKEN"),
-    api_key=os.environ["ZYND_API_KEY"],
-    ...
+    ngrok_auth_token="your-ngrok-auth-token",  # Or set NGROK_AUTH_TOKEN env var
+    registry_url="https://dns01.zynd.ai",
 )
-# Output: Ngrok tunnel active: https://abc123.ngrok-free.app -> localhost:5003
-
-# agent_2.py - CrewAI stock agent on port 5011
-agent2_config = AgentConfig(
-    name="Stock Agent (CrewAI)",
-    webhook_port=5011,
-    config_dir=".agent-crewai",
-    use_ngrok=True,
-    ngrok_auth_token=os.environ.get("NGROK_AUTH_TOKEN"),
-    api_key=os.environ["ZYND_API_KEY"],
-    ...
-)
-# Output: Ngrok tunnel active: https://def456.ngrok-free.app -> localhost:5011
-
-# agent_3.py - User agent on port 5004
-agent3_config = AgentConfig(
-    name="User Agent",
-    webhook_port=5004,
-    config_dir=".agent-user",
-    use_ngrok=True,
-    ngrok_auth_token=os.environ.get("NGROK_AUTH_TOKEN"),
-    api_key=os.environ["ZYND_API_KEY"],
-    ...
-)
-# Output: Ngrok tunnel active: https://ghi789.ngrok-free.app -> localhost:5004
 ```
 
-Run each agent in a separate terminal:
+The public ngrok URL is automatically registered with the registry. Other agents can discover and reach your agent from anywhere.
+
+## CLI Reference
+
+The `zynd` CLI manages agent lifecycle, keypairs, registration, and discovery.
+
+### Agent Workflow (primary commands)
+
+```
+zynd auth login --registry URL         Authenticate with a registry (browser-based)
+zynd agent init                        Interactive wizard — scaffolds project + keypair
+zynd agent register                    Register agent on the network (or update if exists)
+zynd agent update                      Push config changes to registry
+zynd agent run                         Run the agent from current directory
+```
+
+### Identity & Keys
+
+```
+zynd init                              Create developer keypair (~/.zynd/developer.json)
+zynd info                              Show developer and agent identity details
+
+zynd keys list                         List all keypairs
+zynd keys create [--name NAME]         Create standalone agent keypair
+zynd keys derive --index N             HD-derive agent key from developer key
+zynd keys show NAME                    Show keypair details
+```
+
+### Registration & Discovery
+
+```
+zynd register [--name N] [--index N]   Register agent on registry (legacy)
+zynd deregister AGENT_ID               Remove agent from registry
+
+zynd search [QUERY] [--category C]     Search agents
+  [--tags T1 T2] [--federated]
+zynd resolve AGENT_ID [--json]         Look up agent by ID
+
+zynd card init [--index N]             Set up keypair + .env for a project
+zynd card show [AGENT_ID|--file PATH]  Display Agent Card
+```
+
+## Configuration Reference
+
+### AgentConfig Fields
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | `str` | `""` | Agent display name |
+| `description` | `str` | `""` | Agent description |
+| `category` | `str` | `"general"` | Registry category |
+| `tags` | `list[str]` | `None` | Searchable tags |
+| `summary` | `str` | `None` | Short description (max 200 chars) |
+| `capabilities` | `dict` | `None` | Structured capabilities |
+| `webhook_host` | `str` | `"0.0.0.0"` | Bind address |
+| `webhook_port` | `int` | `5000` | Webhook server port |
+| `webhook_url` | `str` | `None` | Public URL (if behind NAT) |
+| `registry_url` | `str` | `"http://localhost:8080"` | Registry endpoint |
+| `auto_reconnect` | `bool` | `True` | Reconnect on disconnect |
+| `keypair_path` | `str` | `None` | Path to Ed25519 keypair JSON |
+| `config_dir` | `str` | `None` | Config directory (default: `.agent`) |
+| `price` | `str` | `None` | x402 price per request (e.g. `"$0.01"`) |
+| `use_ngrok` | `bool` | `False` | Enable ngrok tunnel |
+| `ngrok_auth_token` | `str` | `None` | Ngrok auth token |
+| `developer_keypair_path` | `str` | `None` | Developer key for HD derivation |
+| `agent_index` | `int` | `None` | HD derivation index |
+| `card_output` | `str` | `None` | Output path for Agent Card |
+
+### Environment Variables
+
+| Variable | Description |
+| --- | --- |
+| `ZYND_AGENT_KEYPAIR_PATH` | Path to agent keypair JSON |
+| `ZYND_AGENT_PRIVATE_KEY` | Base64-encoded Ed25519 private key |
+| `ZYND_AGENT_PUBLIC_KEY` | Base64-encoded Ed25519 public key |
+| `ZYND_REGISTRY_URL` | Default registry endpoint |
+| `ZYND_HOME` | Override `~/.zynd/` directory |
+| `NGROK_AUTH_TOKEN` | Ngrok authentication token |
+
+## Running Multiple Agents
+
+Use different `config_dir` values and ports:
+
+```python
+agent1 = ZyndAIAgent(AgentConfig(
+    name="Agent 1", webhook_port=5001, config_dir=".agent-1", ...
+))
+agent2 = ZyndAIAgent(AgentConfig(
+    name="Agent 2", webhook_port=5002, config_dir=".agent-2", ...
+))
+```
+
+With HD derivation, derive separate keypairs for each:
 
 ```bash
-# Terminal 1
-python examples/http/stock_langchain.py
-
-# Terminal 2
-python examples/http/stock_crewai.py
-
-# Terminal 3
-python examples/http/user_agent.py
+zynd keys derive --index 0   # For agent 1
+zynd keys derive --index 1   # For agent 2
 ```
 
-Each agent gets its own public ngrok URL that is automatically registered with the ZyndAI registry. Other agents can discover and reach them from anywhere on the internet.
+## Examples
 
-> **Note:** The free ngrok plan only allows **1 tunnel at a time**. To run multiple agents with ngrok simultaneously, you need a **paid ngrok plan** or use an alternative like [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) which supports multiple free tunnels.
+See `examples/http/` for complete working agents:
 
-See `examples/http/` for complete working examples with ngrok pre-configured.
-
-## Legacy MQTT Support
-
-The SDK also supports MQTT communication for backward compatibility. Configure with `mqtt_broker_url` instead of `webhook_port`. See the `examples/mqtt/` directory for MQTT examples.
-
-## Network Endpoints
-
-- **Registry**: `https://registry.zynd.ai`
-- **Dashboard**: `https://dashboard.zynd.ai`
+- `stock_langchain.py` — LangChain agent with search tools
+- `stock_langgraph.py` — LangGraph compiled graph agent
+- `stock_crewai.py` — CrewAI multi-agent crew
+- `stock_pydantic_ai.py` — PydanticAI typed agent
+- `user_agent.py` — Orchestrator that discovers and delegates to specialist agents
 
 ## Support
 
-- **GitHub Issues**: [Report bugs](https://github.com/Zynd-AI-Network/zyndai-agent/issues)
+- **GitHub Issues**: [Report bugs](https://github.com/zyndai/zyndai-agent/issues)
 - **Documentation**: [docs.zynd.ai](https://docs.zynd.ai)
 - **Email**: zyndainetwork@gmail.com
 - **Twitter**: [@ZyndAI](https://x.com/ZyndAI)
@@ -583,7 +514,3 @@ The SDK also supports MQTT communication for backward compatibility. Configure w
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-
----
-
-**Get started:** `pip install zyndai-agent`

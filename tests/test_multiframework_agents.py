@@ -9,27 +9,27 @@ Tests the invoke() method dispatching across all supported frameworks:
 - Custom callable
 """
 
+import base64
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from zyndai_agent.agent import AgentFramework, AgentConfig, ZyndAIAgent
+from zyndai_agent.ed25519_identity import generate_keypair
 
 
 # ---------------------------------------------------------------------------
 # Fixtures & helpers
 # ---------------------------------------------------------------------------
 
+# Generate a real Ed25519 keypair for testing
+_test_kp = generate_keypair()
+
 FAKE_CONFIG = {
-    "id": "test-agent-id",
-    "didIdentifier": "did:polygonid:test",
-    "did": {
-        "issuer": "did:polygonid:test:issuer",
-        "id": "test-cred-id",
-        "credentialSubject": {"x": "123", "y": "456", "type": "AuthBJJCredential"},
-        "type": ["VerifiableCredential", "AuthBJJCredential"],
-    },
+    "schema_version": "2.0",
+    "agent_id": _test_kp.agent_id,
+    "public_key": _test_kp.public_key_string,
+    "private_key": _test_kp.private_key_b64,
     "name": "Test Agent",
     "description": "A test agent",
-    "seed": "dGVzdHNlZWQxMjM0NTY3ODkwMTIzNDU2Nzg5MDEyMzQ=",  # 32 bytes base64
 }
 
 
@@ -48,24 +48,19 @@ def mock_agent():
         patch(
             "zyndai_agent.agent.WebhookCommunicationManager.__init__", return_value=None
         ),
-        patch("zyndai_agent.agent.requests.patch") as mock_req_patch,
     ):
         mock_x402_inst = MagicMock()
         mock_x402_inst.account.address = "0xFakeAddress"
         mock_x402.return_value = mock_x402_inst
 
-        mock_req_patch.return_value = MagicMock(status_code=200)
-
         config = AgentConfig(
             name="TestAgent",
             description="Test",
             webhook_port=15000,
-            api_key="test-key",
-            registry_url="http://localhost:3002",
+            registry_url="http://localhost:8080",
         )
 
         # Set webhook_url as instance attribute before __init__ calls _display_agent_info
-        # Since WebhookCommunicationManager.__init__ is mocked, we need to set it manually
         agent = ZyndAIAgent.__new__(ZyndAIAgent)
         agent.webhook_url = "http://localhost:15000/webhook"
         ZyndAIAgent.__init__(agent, config)
@@ -201,7 +196,6 @@ class TestInvokeLangGraph:
         mock_agent.set_langgraph_agent(graph)
 
         result = mock_agent.invoke("q")
-        # Falls through to str(result)
         assert "messages" in result
 
     def test_invoke_handles_no_messages_key(self, mock_agent):

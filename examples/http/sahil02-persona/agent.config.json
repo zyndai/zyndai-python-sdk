@@ -1,0 +1,13 @@
+{
+  "name": "sahil02-persona",
+  "agent_name": "sahil02-persona",
+  "framework": "langchain",
+  "description": "sahil02-persona agent",
+  "category": "general",
+  "tags": [],
+  "summary": "",
+  "webhook_port": 5002,
+  "registry_url": "http://localhost:8080",
+  "keypair_path": "/Users/swapnilshinde/.zynd/agents/sahil02-persona/keypair.json",
+  "agent_index": 5
+}

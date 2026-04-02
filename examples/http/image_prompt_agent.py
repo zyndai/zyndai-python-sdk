@@ -168,15 +168,14 @@ def main():
             "ai": ["vision", "image-analysis", "multimodal"],
             "data": ["image-processing"],
         },
+        category="vision",
+        tags=["image", "multimodal", "vision-api"],
+        summary="Multimodal agent that processes image URLs with text prompts via vision API.",
         webhook_port=5000,
-        api_key=os.environ.get("ZYND_API_KEY", "your-api-key"),
-        registry_url=os.environ.get("ZYND_REGISTRY_URL", "https://registry.zynd.ai"),
+        registry_url=os.environ.get("ZYND_REGISTRY_URL", "http://localhost:8080"),
         # Enable ngrok to expose this agent publicly (requires: pip install zyndai-agent[ngrok])
-        # Each agent on a different port gets its own ngrok tunnel URL
         use_ngrok=True,
-        ngrok_auth_token=os.environ.get(
-            "NGROK_AUTH_TOKEN"
-        ),  # Or set globally via: ngrok config add-authtoken <token>
+        ngrok_auth_token=os.environ.get("NGROK_AUTH_TOKEN"),
     )
 
     # Initialize agent

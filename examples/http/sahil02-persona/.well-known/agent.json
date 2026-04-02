@@ -1,0 +1,33 @@
+{
+  "agent_id": "agdns:21a8f766017afc6eee954610daf9b966",
+  "public_key": "ed25519:0R5plgtAdyO6CGhlz+u1lZbWjDK/o7Rr2XmUiQSm6fE=",
+  "name": "sahil02-persona",
+  "description": "sahil02-persona agent",
+  "version": "1.0",
+  "category": "general",
+  "capabilities": [
+    {
+      "name": "nlp",
+      "category": "ai"
+    },
+    {
+      "name": "langchain",
+      "category": "ai"
+    },
+    {
+      "name": "http",
+      "category": "protocols"
+    }
+  ],
+  "agent_url": "http://localhost:5002",
+  "endpoints": {
+    "invoke": "http://localhost:5002/webhook/sync",
+    "invoke_async": "http://localhost:5002/webhook",
+    "health": "http://localhost:5002/health",
+    "agent_card": "http://localhost:5002/.well-known/agent.json"
+  },
+  "status": "online",
+  "last_heartbeat": "2026-04-02T05:56:33Z",
+  "signed_at": "2026-04-02T05:56:33Z",
+  "signature": "ed25519:9FDBbV7eRRv8HsXcl6w4caAzrKcvf49dcFmj8kuZf4wr1Ox3qy47KiZda/LL0iyrU0n1UPhs6EgWF0e5GGpjBQ=="
+}

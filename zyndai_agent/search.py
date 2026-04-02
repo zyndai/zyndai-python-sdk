@@ -1,9 +1,10 @@
 # Agent Discovery and Search Protocol Module for ZyndAI
 import logging
 import requests
-from urllib.parse import urlencode
 
 from typing import List, Optional, TypedDict
+
+from zyndai_agent import dns_registry
 
 
 logging.basicConfig(
@@ -14,98 +15,87 @@ logger = logging.getLogger("SearchAndDiscovery")
 
 
 class AgentSearchResponse(TypedDict):
-    id: str
+    """Search result from agent-dns registry."""
+    agent_id: str
     name: str
-    description: str
-    mqttUri: Optional[str]  # Deprecated, kept for backward compatibility
-    httpWebhookUrl: Optional[str]  # Field for webhook communication
-    inboxTopic: Optional[str]
-    capabilities: Optional[dict]
+    summary: str
+    category: str
+    tags: list
+    capability_summary: Optional[dict]
+    agent_url: str
+    home_registry: str
+    score: float
+    score_breakdown: Optional[dict]
+    card: Optional[dict]  # if enrich=true
     status: Optional[str]
-    didIdentifier: str
-    did: str  # JSON string of DID credential
+    last_heartbeat: Optional[str]
 
 
 class SearchAndDiscoveryManager:
     """
-    This class implements the search and discovery protocol for ZyndAI agents.
-    It allows agents to discover each other and share information about their capabilities.
+    Search and discovery protocol for ZyndAI agents using agent-dns registry.
 
-    The search uses semantic matching via the keyword parameter, allowing for
-    fuzzy/vague searches across agent names, descriptions, and capabilities.
+    Uses POST /v1/search with rich query body for semantic and structured search.
     """
 
-    def __init__(self, registry_url: str = "http://localhost:3002"):
+    def __init__(self, registry_url: str = "http://localhost:8080"):
         self.agents = []
         self.registry_url = registry_url
 
     def search_agents(
         self,
         keyword: Optional[str] = None,
-        name: Optional[str] = None,
-        capabilities: Optional[List[str]] = None,
-        status: Optional[str] = None,
-        did: Optional[str] = None,
+        category: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        skills: Optional[List[str]] = None,
+        protocols: Optional[List[str]] = None,
+        languages: Optional[List[str]] = None,
+        models: Optional[List[str]] = None,
+        min_trust_score: Optional[float] = None,
         limit: int = 10,
-        offset: int = 0
+        federated: bool = False,
+        enrich: bool = False,
     ) -> List[AgentSearchResponse]:
         """
-        Search for agents in the registry using various filters.
-
-        The keyword parameter supports semantic search across name, description,
-        capabilities, and metadata fields.
+        Search for agents using the agent-dns POST /v1/search endpoint.
 
         Args:
-            keyword: Semantic search term (searches across name, description, capabilities, metadata)
-            name: Filter by agent name (case-insensitive, partial match)
-            capabilities: List of capabilities to filter by
-            status: Filter by agent status (e.g., "ACTIVE")
-            did: Filter by exact DID match
-            limit: Maximum number of results to return (default: 10, max: 100)
-            offset: Number of results to skip for pagination (default: 0)
+            keyword: Semantic search query
+            category: Filter by agent category
+            tags: Filter by tags
+            skills: Filter by skills/capabilities
+            protocols: Filter by supported protocols
+            languages: Filter by supported languages
+            models: Filter by AI models used
+            min_trust_score: Minimum trust score filter
+            limit: Maximum number of results (default: 10)
+            federated: Whether to search federated registries
+            enrich: Whether to include Agent Card data in results
 
         Returns:
             List of matching agents
         """
-        logger.info(f"Searching agents with keyword='{keyword}', capabilities={capabilities}")
+        logger.info(f"Searching agents with query='{keyword}', skills={skills}")
 
-        # Build query parameters
-        params = {}
+        result = dns_registry.search_agents(
+            registry_url=self.registry_url,
+            query=keyword,
+            category=category,
+            tags=tags,
+            skills=skills,
+            protocols=protocols,
+            languages=languages,
+            models=models,
+            min_trust_score=min_trust_score,
+            max_results=limit,
+            federated=federated,
+            enrich=enrich,
+        )
 
-        if keyword:
-            params["keyword"] = keyword
-        if name:
-            params["name"] = name
-        if capabilities:
-            params["capabilities"] = ",".join(capabilities)
-        if status:
-            params["status"] = status
-        if did:
-            params["did"] = did
-
-        params["limit"] = limit
-        params["offset"] = offset
-
-        try:
-            url = f"{self.registry_url}/agents"
-            logger.info(f"GET {url}?{urlencode(params)}")
-
-            resp = requests.get(url, params=params)
-
-            if resp.status_code == 200:
-                response_data = resp.json()
-                # API returns { data: [...], count: N, total: N }
-                agents = response_data.get("data", [])
-                total = response_data.get("total", len(agents))
-                logger.info(f"Found {len(agents)} agents (total: {total}).")
-                return agents
-            else:
-                logger.error(f"Failed to search agents: {resp.status_code} - {resp.text}")
-                return []
-
-        except requests.RequestException as e:
-            logger.error(f"Request failed: {e}")
-            return []
+        agents = result.get("results", [])
+        total = result.get("total_found", len(agents))
+        logger.info(f"Found {len(agents)} agents (total: {total}).")
+        return agents
 
     def search_agents_by_capabilities(
         self,
@@ -113,10 +103,8 @@ class SearchAndDiscoveryManager:
         top_k: Optional[int] = None
     ) -> List[AgentSearchResponse]:
         """
-        Discover agents based on capabilities using semantic keyword search.
-
-        This method converts capabilities into a keyword search query for
-        semantic matching across the registry.
+        Discover agents based on capabilities.
+        Capabilities are passed as 'skills' in the search request.
 
         Args:
             capabilities: List of capability terms to search for
@@ -127,59 +115,53 @@ class SearchAndDiscoveryManager:
         """
         logger.info(f"Discovering agents by capabilities: {capabilities}")
 
-        # Convert capabilities list into a semantic search keyword
-        # Join capabilities into a search phrase for semantic matching
+        # Convert capabilities to both query and skills
         keyword = " ".join(capabilities) if capabilities else None
-
         limit = top_k if top_k is not None else 10
 
         return self.search_agents(
             keyword=keyword,
-            limit=limit
+            skills=capabilities if capabilities else None,
+            limit=limit,
         )
 
     def search_agents_by_keyword(
         self,
         keyword: str,
         limit: int = 10,
-        offset: int = 0
     ) -> List[AgentSearchResponse]:
         """
         Search for agents using a semantic keyword search.
 
-        The keyword is matched against agent name, description, capabilities,
-        and metadata using semantic search.
-
         Args:
             keyword: Search term for semantic matching
             limit: Maximum number of results (default: 10)
-            offset: Pagination offset (default: 0)
 
         Returns:
             List of matching agents
         """
-        return self.search_agents(keyword=keyword, limit=limit, offset=offset)
+        return self.search_agents(keyword=keyword, limit=limit)
 
     def get_agent_by_id(self, agent_id: str) -> Optional[AgentSearchResponse]:
         """
         Get a specific agent by its ID.
 
         Args:
-            agent_id: The unique identifier of the agent
+            agent_id: The agent ID (agdns:... format)
 
         Returns:
             Agent details or None if not found
         """
-        try:
-            url = f"{self.registry_url}/agents/{agent_id}"
-            resp = requests.get(url)
+        return dns_registry.get_agent(self.registry_url, agent_id)
 
-            if resp.status_code == 200:
-                return resp.json()
-            else:
-                logger.error(f"Failed to get agent {agent_id}: {resp.status_code}")
-                return None
+    def get_agent_card(self, agent_id: str) -> Optional[dict]:
+        """
+        Fetch an agent's Agent Card.
 
-        except requests.RequestException as e:
-            logger.error(f"Request failed: {e}")
-            return None
+        Args:
+            agent_id: The agent ID
+
+        Returns:
+            Agent Card dict or None
+        """
+        return dns_registry.get_agent_card(self.registry_url, agent_id)

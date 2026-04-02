@@ -1,5 +1,5 @@
 """
-Tests for ConfigManager: load, save, create, and load_or_create.
+Tests for ConfigManager: load, save, create, migration, and load_or_create.
 """
 
 import json
@@ -27,7 +27,7 @@ class TestConfigManagerPaths:
 class TestConfigManagerSaveLoad:
     def test_save_and_load(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        config = {"id": "test", "name": "TestAgent", "seed": "abc"}
+        config = {"agent_id": "agdns:test", "name": "TestAgent", "schema_version": "2.0"}
         ConfigManager.save_config(config, ".agent-test")
         loaded = ConfigManager.load_config(".agent-test")
         assert loaded == config
@@ -39,96 +39,115 @@ class TestConfigManagerSaveLoad:
 
     def test_save_creates_directory(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        ConfigManager.save_config({"id": "1"}, ".agent-new")
+        ConfigManager.save_config({"agent_id": "agdns:1"}, ".agent-new")
         assert os.path.exists(tmp_path / ".agent-new" / "config.json")
 
 
 class TestConfigManagerCreate:
-    @patch("zyndai_agent.config_manager.requests.post")
-    def test_create_agent_success(self, mock_post, tmp_path, monkeypatch):
+    @patch("zyndai_agent.config_manager.dns_registry.register_agent")
+    def test_create_agent_success(self, mock_register, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        mock_response = MagicMock()
-        mock_response.status_code = 201
-        mock_response.json.return_value = {
-            "id": "new-id",
-            "didIdentifier": "did:polygonid:new",
-            "did": json.dumps(
-                {
-                    "issuer": "did:polygonid:new:issuer",
-                    "credentialSubject": {
-                        "x": "1",
-                        "y": "2",
-                        "type": "AuthBJJCredential",
-                    },
-                }
-            ),
-            "name": "New Agent",
-            "description": "New desc",
-            "seed": "c2VlZA==",
-        }
-        mock_post.return_value = mock_response
+        mock_register.return_value = "agdns:test123"
 
-        result = ConfigManager.create_agent(
-            registry_url="http://localhost:3002",
-            api_key="key",
+        agent_config = AgentConfig(
             name="New Agent",
             description="New desc",
             capabilities={"ai": ["nlp"]},
-            config_dir=".agent-new",
+            registry_url="http://localhost:8080",
         )
 
-        assert result["id"] == "new-id"
+        result = ConfigManager.create_agent(agent_config, ".agent-new")
+
+        assert result["schema_version"] == "2.0"
+        assert result["agent_id"].startswith("agdns:")
+        assert result["public_key"].startswith("ed25519:")
+        assert "private_key" in result
         assert result["name"] == "New Agent"
-        assert isinstance(result["did"], dict)  # Should be parsed from JSON string
+        mock_register.assert_called_once()
 
-    @patch("zyndai_agent.config_manager.requests.post")
-    def test_create_agent_failure(self, mock_post, tmp_path, monkeypatch):
+    @patch("zyndai_agent.config_manager.dns_registry.register_agent")
+    def test_create_agent_registry_failure_still_saves(self, mock_register, tmp_path, monkeypatch):
+        """Agent should still be created locally even if registry is down."""
         monkeypatch.chdir(tmp_path)
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-        mock_response.text = "Internal Server Error"
-        mock_post.return_value = mock_response
+        mock_register.side_effect = Exception("Connection refused")
 
-        with pytest.raises(RuntimeError, match="Failed to create agent"):
-            ConfigManager.create_agent(
-                registry_url="http://localhost:3002",
-                api_key="key",
-                name="Agent",
-                description="desc",
-                capabilities={},
-            )
+        agent_config = AgentConfig(
+            name="Offline Agent",
+            description="Works offline",
+            capabilities={"ai": ["nlp"]},
+        )
+
+        result = ConfigManager.create_agent(agent_config, ".agent-offline")
+        assert result["agent_id"].startswith("agdns:")
+        assert os.path.exists(tmp_path / ".agent-offline" / "config.json")
+
+
+class TestLegacyMigration:
+    def test_is_legacy_config(self):
+        legacy = {"didIdentifier": "did:polygonid:test", "id": "old-id", "seed": "abc"}
+        assert ConfigManager._is_legacy_config(legacy) is True
+
+    def test_v2_config_is_not_legacy(self):
+        v2 = {"schema_version": "2.0", "agent_id": "agdns:abc"}
+        assert ConfigManager._is_legacy_config(v2) is False
+
+    @patch("zyndai_agent.config_manager.dns_registry.register_agent")
+    def test_auto_migration(self, mock_register, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        mock_register.return_value = "agdns:migrated"
+
+        # Save a legacy v1 config
+        legacy_config = {
+            "id": "old-uuid",
+            "didIdentifier": "did:polygonid:old",
+            "did": {"issuer": "did:polygonid:old:issuer"},
+            "name": "Old Agent",
+            "description": "Old desc",
+            "seed": "dGVzdHNlZWQxMjM0NTY3ODkwMTIzNDU2Nzg5MDEyMzQ=",
+        }
+        ConfigManager.save_config(legacy_config, ".agent")
+
+        agent_config = AgentConfig(
+            name="Old Agent",
+            description="Old desc",
+            capabilities={"ai": ["nlp"]},
+        )
+
+        result = ConfigManager.load_or_create(agent_config)
+
+        # Should be migrated to v2
+        assert result["schema_version"] == "2.0"
+        assert result["agent_id"].startswith("agdns:")
+        assert result["public_key"].startswith("ed25519:")
+        # Legacy seed should be preserved
+        assert result["legacy_seed"] == legacy_config["seed"]
 
 
 class TestLoadOrCreate:
-    def test_loads_existing_config(self, tmp_path, monkeypatch):
+    def test_loads_existing_v2_config(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         config = {
-            "id": "existing",
-            "seed": "s",
-            "did": {},
+            "schema_version": "2.0",
+            "agent_id": "agdns:existing",
+            "public_key": "ed25519:AAAA",
+            "private_key": "BBBB",
             "name": "N",
             "description": "D",
         }
         ConfigManager.save_config(config, ".agent")
 
-        agent_config = AgentConfig(name="N", description="D", api_key="k")
+        agent_config = AgentConfig(name="N", description="D")
         result = ConfigManager.load_or_create(agent_config)
-        assert result["id"] == "existing"
-
-    def test_raises_without_api_key(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        agent_config = AgentConfig(name="N")
-        with pytest.raises(ValueError, match="api_key is required"):
-            ConfigManager.load_or_create(agent_config)
+        assert result["agent_id"] == "agdns:existing"
 
     def test_raises_without_name(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        agent_config = AgentConfig(api_key="k")
+        agent_config = AgentConfig()
         with pytest.raises(ValueError, match="name is required"):
             ConfigManager.load_or_create(agent_config)
 
     def test_raises_without_capabilities(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        agent_config = AgentConfig(name="N", api_key="k")
+        agent_config = AgentConfig(name="N")
         with pytest.raises(ValueError, match="capabilities is required"):
             ConfigManager.load_or_create(agent_config)

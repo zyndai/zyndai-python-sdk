@@ -22,6 +22,7 @@ class AgentMessage:
         content: str,
         sender_id: str,
         sender_did: dict = None,
+        sender_public_key: Optional[str] = None,
         receiver_id: Optional[str] = None,
         message_type: str = "query",
         message_id: Optional[str] = None,
@@ -35,7 +36,8 @@ class AgentMessage:
         Args:
             content: The main message content
             sender_id: Identifier for the message sender
-            sender_did: DID credential of the sender
+            sender_did: DID credential of the sender (deprecated, kept for backward compat)
+            sender_public_key: Ed25519 public key string of sender (e.g., "ed25519:<b64>")
             receiver_id: Identifier for the intended recipient (None for broadcasts)
             message_type: Type categorization ("query", "response", "broadcast", "system")
             message_id: Unique identifier for this message (auto-generated if None)
@@ -47,6 +49,7 @@ class AgentMessage:
         self.sender_id = sender_id
         self.receiver_id = receiver_id
         self.sender_did = sender_did
+        self.sender_public_key = sender_public_key
         self.message_type = message_type
         self.message_id = message_id or str(uuid.uuid4())
         self.conversation_id = conversation_id or str(uuid.uuid4())
@@ -56,11 +59,12 @@ class AgentMessage:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert message to dictionary format."""
-        return {
+        d = {
             "content": self.content,
             "prompt": self.content,
             "sender_id": self.sender_id,
             "sender_did": self.sender_did,
+            "sender_public_key": self.sender_public_key,
             "receiver_id": self.receiver_id,
             "message_type": self.message_type,
             "message_id": self.message_id,
@@ -69,6 +73,7 @@ class AgentMessage:
             "metadata": self.metadata,
             "timestamp": self.timestamp
         }
+        return d
 
     def to_json(self) -> str:
         """Convert message to JSON string for transmission."""
@@ -81,6 +86,7 @@ class AgentMessage:
             content=data.get("prompt", data.get("content", "")),
             sender_id=data.get("sender_id", "unknown"),
             sender_did=data.get("sender_did", "unknown"),
+            sender_public_key=data.get("sender_public_key"),
             receiver_id=data.get("receiver_id"),
             message_type=data.get("message_type", "query"),
             message_id=data.get("message_id"),

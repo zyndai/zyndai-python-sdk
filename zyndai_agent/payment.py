@@ -1,3 +1,4 @@
+import base64
 import requests
 import logging
 from typing import Optional, Dict, Any
@@ -20,27 +21,37 @@ class X402PaymentProcessor:
     """
     A processor for handling HTTP requests with automatic x402 micropayments.
 
-    This class wraps the requests library to automatically handle 402 Payment Required
-    responses by creating and sending payment headers for EVM-compatible networks.
-
-    Attributes:
-        account (LocalAccount): The Ethereum account used for signing payments
-        session (requests.Session): HTTP session with x402 payment adapter mounted
+    Supports two key sources:
+    1. Legacy seed (base64) — for migrated agents, preserves ETH address
+    2. Ed25519 private key bytes — for new agents, derives ETH key from Ed25519 seed
     """
 
-    def __init__(self, agent_seed: str, max_payment_usd: float = 0.1):
+    def __init__(
+        self,
+        agent_seed: Optional[str] = None,
+        ed25519_private_key_bytes: Optional[bytes] = None,
+        max_payment_usd: float = 0.1,
+    ):
         """
         Initialize the X402 Payment Processor.
 
         Args:
-            agent_seed (str): Base64-encoded private key for the payment account
-            max_payment_usd (float): Maximum payment amount in USD (default: 0.1)
+            agent_seed: Base64-encoded seed (legacy or direct)
+            ed25519_private_key_bytes: Raw 32-byte Ed25519 private key seed
+            max_payment_usd: Maximum payment amount in USD (default: 0.1)
 
-        Raises:
-            ValueError: If the agent_seed is invalid or account creation fails
+        Either agent_seed or ed25519_private_key_bytes must be provided.
         """
         try:
-            private_key = private_key_from_base64(agent_seed)
+            if agent_seed:
+                private_key = private_key_from_base64(agent_seed)
+            elif ed25519_private_key_bytes:
+                # Use Ed25519 private key bytes as seed for ETH key
+                seed_b64 = base64.b64encode(ed25519_private_key_bytes).decode()
+                private_key = private_key_from_base64(seed_b64)
+            else:
+                raise ValueError("Either agent_seed or ed25519_private_key_bytes must be provided")
+
             self.account: LocalAccount = Account.from_key(private_key)
 
             # Create x402 client with EVM signer (v2 API)
@@ -65,19 +76,7 @@ class X402PaymentProcessor:
             raise ValueError(f"Invalid agent seed or account creation failed: {e}")
 
     def get(self, url: str, **kwargs) -> requests.Response:
-        """
-        Perform a GET request with automatic payment handling.
-
-        Args:
-            url (str): The URL to request
-            **kwargs: Additional arguments to pass to requests.get()
-
-        Returns:
-            requests.Response: The response object
-
-        Raises:
-            requests.RequestException: If the request fails
-        """
+        """Perform a GET request with automatic payment handling."""
         try:
             logger.debug(f"GET request to: {url}")
             response = self.session.get(url, **kwargs)
@@ -94,21 +93,7 @@ class X402PaymentProcessor:
         json: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> requests.Response:
-        """
-        Perform a POST request with automatic payment handling.
-
-        Args:
-            url (str): The URL to request
-            data (Optional[Dict]): Form data to send
-            json (Optional[Dict]): JSON data to send
-            **kwargs: Additional arguments to pass to requests.post()
-
-        Returns:
-            requests.Response: The response object
-
-        Raises:
-            requests.RequestException: If the request fails
-        """
+        """Perform a POST request with automatic payment handling."""
         try:
             logger.debug(f"POST request to: {url}")
             response = self.session.post(url, data=data, json=json, **kwargs)
@@ -119,20 +104,7 @@ class X402PaymentProcessor:
             raise
 
     def request(self, method: str, url: str, **kwargs) -> requests.Response:
-        """
-        Perform any HTTP request with automatic payment handling.
-
-        Args:
-            method (str): HTTP method (GET, POST, PUT, DELETE, etc.)
-            url (str): The URL to request
-            **kwargs: Additional arguments to pass to requests.request()
-
-        Returns:
-            requests.Response: The response object
-
-        Raises:
-            requests.RequestException: If the request fails
-        """
+        """Perform any HTTP request with automatic payment handling."""
         try:
             logger.debug(f"{method.upper()} request to: {url}")
             response = self.session.request(method, url, **kwargs)

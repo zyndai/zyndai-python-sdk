@@ -6,6 +6,17 @@ from zyndai_agent.search import SearchAndDiscoveryManager, AgentSearchResponse
 from zyndai_agent.identity import IdentityManager
 from zyndai_agent.payment import X402PaymentProcessor
 from zyndai_agent.config_manager import ConfigManager
+from zyndai_agent.ed25519_identity import Ed25519Keypair, generate_keypair, keypair_from_private_bytes
+from zyndai_agent.agent_card import build_agent_card, sign_agent_card, build_endpoints
+from zyndai_agent.agent_card_loader import (
+    load_agent_card,
+    resolve_keypair,
+    build_runtime_card,
+    compute_card_hash,
+    resolve_card_from_config,
+    load_derivation_metadata,
+)
+from zyndai_agent import dns_registry as DNSRegistryClient
 
 __all__ = [
     "ZyndAIAgent",
@@ -19,4 +30,17 @@ __all__ = [
     "IdentityManager",
     "X402PaymentProcessor",
     "ConfigManager",
+    "Ed25519Keypair",
+    "generate_keypair",
+    "keypair_from_private_bytes",
+    "build_agent_card",
+    "sign_agent_card",
+    "build_endpoints",
+    "load_agent_card",
+    "resolve_keypair",
+    "build_runtime_card",
+    "compute_card_hash",
+    "resolve_card_from_config",
+    "load_derivation_metadata",
+    "DNSRegistryClient",
 ]
