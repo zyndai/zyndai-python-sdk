@@ -2,7 +2,10 @@ import time
 import json 
 import logging
 import uuid
-import paho.mqtt.client as mqtt
+try:
+    import paho.mqtt.client as mqtt
+except ImportError:
+    mqtt = None
 
 from zyndai_agent.utils import encrypt_message, decrypt_message
 from typing import List, Callable, Optional, Dict, Any
@@ -168,6 +171,8 @@ class AgentCommunicationManager:
         self.message_handlers = []
         
 
+        if mqtt is None:
+            raise ImportError("paho-mqtt is required for MQTT communication. Install with: pip install zyndai-agent[mqtt]")
         self.mqtt_client = mqtt.Client(client_id=self.agent_id)
         self.mqtt_client.on_connect = self._handle_connect
         self.mqtt_client.on_message = self._handle_message
