@@ -43,8 +43,12 @@ class ConfigManager:
         if not os.path.exists(config_path):
             return None
 
-        with open(config_path, "r") as f:
-            config = json.load(f)
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+        except json.JSONDecodeError:
+            print(f"Warning: {config_path} is corrupted. Creating a new agent...")
+            return None
 
         print(f"Loaded agent config from {config_path}")
         return config

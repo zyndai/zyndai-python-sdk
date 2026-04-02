@@ -1,0 +1,37 @@
+{
+  "agent_id": "agdns:92bab5e6833826b36e2e1b272695414d",
+  "public_key": "ed25519:gKH4VSJ838fG1jg6Y14EwwAkQ5PbXsCsu7ckS3SeGRw=",
+  "name": "swapnil-tes",
+  "description": "swapnil-tes \u2014 a LangChain agent on the ZyndAI network.",
+  "version": "1.0",
+  "category": "general",
+  "tags": [
+    "langchain"
+  ],
+  "summary": "swapnil-tes agent",
+  "capabilities": [
+    {
+      "name": "nlp",
+      "category": "ai"
+    },
+    {
+      "name": "langchain",
+      "category": "ai"
+    },
+    {
+      "name": "http",
+      "category": "protocols"
+    }
+  ],
+  "agent_url": "http://localhost:5000",
+  "endpoints": {
+    "invoke": "http://localhost:5000/webhook/sync",
+    "invoke_async": "http://localhost:5000/webhook",
+    "health": "http://localhost:5000/health",
+    "agent_card": "http://localhost:5000/.well-known/agent.json"
+  },
+  "status": "online",
+  "last_heartbeat": "2026-03-30T11:11:16Z",
+  "signed_at": "2026-03-30T11:11:16Z",
+  "signature": "ed25519:5+ZxT9ULrd/UfRcBg7g9JZOhTnFUKDAy8lBVPEYOSA1ZnqGFPw6FIqspGPYI/dBwEIMeAR4p5VZHE3nc5DtsDw=="
+}
