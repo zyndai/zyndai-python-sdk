@@ -16,7 +16,6 @@ from zyndai_agent.config_manager import ConfigManager
 from zyndai_agent.ed25519_identity import (
     Ed25519Keypair,
     keypair_from_private_bytes,
-    create_derivation_proof,
 )
 from zyndai_agent.agent_card import build_agent_card, sign_agent_card
 from zyndai_agent.agent_card_loader import (
@@ -102,7 +101,6 @@ class AgentConfig(BaseModel):
 
     # Keypair and registration
     keypair_path: Optional[str] = None     # Path to keypair JSON
-    auto_register: bool = True             # Self-register on startup
     card_output: Optional[str] = None      # Output path for .well-known/agent.json (default: .well-known/agent.json)
 
 
@@ -227,14 +225,10 @@ class ZyndAIAgent(
         if self.keypair and self.communication_mode == "webhook":
             self._write_card_file()
 
-        # Self-register on the registry
-        if agent_config.auto_register and self.keypair:
-            self._self_register(agent_config.registry_url)
-
-        # Start heartbeat background thread
+        # Start heartbeat background thread (only if already registered via `zynd agent register`)
         self._heartbeat_thread = None
         self._heartbeat_stop = threading.Event()
-        if self.keypair and agent_config.auto_register:
+        if self.keypair:
             self._start_heartbeat(agent_config.registry_url)
 
         # Display agent info
@@ -419,74 +413,6 @@ class ZyndAIAgent(
             return webhook_url[: -len("/webhook")]
         return webhook_url
 
-    def _self_register(self, registry_url: str):
-        """
-        Self-register or update on the registry based on card content.
-
-        Compares the current card hash with the stored hash to detect changes.
-        If the agent is not registered or the card has changed, registers/updates.
-        """
-        if not self.keypair or not self._static_card:
-            return
-
-        base_url = self._get_base_url()
-        runtime_card = build_runtime_card(self._static_card, base_url, self.keypair)
-        current_hash = compute_card_hash(self._static_card)
-        stored_hash = self._load_card_hash()
-
-        try:
-            existing = dns_registry.get_agent(registry_url, self.agent_id)
-
-            if existing is None:
-                # Not registered — register with developer proof if available
-                developer_proof = None
-                developer_id = None
-
-                # Try to get derivation metadata for developer proof
-                keypair_path = os.environ.get("ZYND_AGENT_KEYPAIR_PATH") or \
-                               getattr(self.agent_config, "keypair_path", None)
-                if keypair_path:
-                    derivation = load_derivation_metadata(keypair_path)
-                    if derivation:
-                        # We have derivation metadata but need the developer's private key
-                        # to create a proof. Store developer_id for registration.
-                        developer_id = None  # Would need dev keypair to derive this
-
-                dns_registry.register_agent(
-                    registry_url=registry_url,
-                    keypair=self.keypair,
-                    name=self._static_card.get("name", ""),
-                    agent_url=base_url,
-                    category=self._static_card.get("category", "general"),
-                    tags=self._static_card.get("tags"),
-                    summary=self._static_card.get("summary"),
-                    developer_id=developer_id,
-                    developer_proof=developer_proof,
-                )
-                _log_ok(f"Registered on network: {self.agent_id}")
-
-            elif current_hash != stored_hash:
-                # Card changed — update registry
-                updates = {
-                    "name": self._static_card.get("name", ""),
-                    "agent_url": base_url,
-                    "category": self._static_card.get("category", "general"),
-                    "tags": self._static_card.get("tags", []),
-                    "summary": self._static_card.get("summary", ""),
-                }
-                if dns_registry.update_agent(registry_url, self.agent_id, self.keypair, updates):
-                    _log_ok(f"Updated on network: {self.agent_id}")
-                else:
-                    _log_warn("Failed to update agent on registry")
-            else:
-                _log_ok(f"Already registered (no changes)")
-
-            self._save_card_hash(current_hash)
-
-        except Exception as e:
-            logger.warning(f"Self-registration failed: {e}")
-            _log_warn(f"Could not self-register: {e}")
-
     def _load_card_hash(self) -> Optional[str]:
         """Load the stored card hash from .agent/card_hash."""
         config_dir = getattr(self.agent_config, "config_dir", None) or ".agent"
@@ -516,6 +442,13 @@ class ZyndAIAgent(
         price = self.agent_config.price or "Free"
         pub_key = self.keypair.public_key_string if self.keypair else "-"
 
+        # Try to resolve FQAN (registry/developer/agent)
+        fqan = None
+        try:
+            fqan = dns_registry.get_agent_fqan(self.agent_config.registry_url, agent_id)
+        except Exception:
+            pass
+
         if _console:
             _console.print()
             _console.print(f"  [bold #8B5CF6]╔{'═' * 56}╗[/bold #8B5CF6]")
@@ -525,6 +458,8 @@ class ZyndAIAgent(
             _console.print(f"  [dim]Name[/dim]         [bold white]{name}[/bold white]")
             _console.print(f"  [dim]Description[/dim]  {description}")
             _console.print(f"  [dim]Agent ID[/dim]     [#06B6D4]{agent_id}[/#06B6D4]")
+            if fqan:
+                _console.print(f"  [dim]FQAN[/dim]         [bold #F59E0B]{fqan}[/bold #F59E0B]")
             _console.print(f"  [dim]Public Key[/dim]   [dim]{pub_key}[/dim]")
             _console.print(f"  [dim]Address[/dim]      [dim]{address}[/dim]")
             _console.print(f"  [dim]Mode[/dim]         {mode}")
@@ -545,6 +480,8 @@ class ZyndAIAgent(
             print(f"  Name        : {name}")
             print(f"  Description : {description}")
             print(f"  Agent ID    : {agent_id}")
+            if fqan:
+                print(f"  FQAN        : {fqan}")
             print(f"  Public Key  : {pub_key}")
             print(f"  Address     : {address}")
             print(f"  Mode        : {mode}")

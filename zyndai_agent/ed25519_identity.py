@@ -134,6 +134,15 @@ def generate_agent_id(public_key_bytes: bytes) -> str:
     return "agdns:" + digest[:16].hex()
 
 
+def generate_developer_id(public_key_bytes: bytes) -> str:
+    """
+    Generate developer ID from public key bytes.
+    Matches developer.go:84-86: "agdns:dev:" + sha256(pub)[:16].hex()
+    """
+    digest = hashlib.sha256(public_key_bytes).digest()
+    return "agdns:dev:" + digest[:16].hex()
+
+
 def sign(private_key: Ed25519PrivateKey, message: bytes) -> str:
     """
     Sign a message and return 'ed25519:<b64 signature>'.
@@ -198,6 +207,14 @@ def derive_agent_keypair(dev_private_key: Ed25519PrivateKey, index: int) -> Ed25
     return keypair_from_private_bytes(derived_seed)
 
 
+def _build_proof_message(agent_pub_bytes: bytes, index: int) -> bytes:
+    """
+    Build canonical proof message: agent_public_key_bytes || big_endian_uint32(index).
+    Matches Go identity.go:buildProofMessage.
+    """
+    return agent_pub_bytes + struct.pack(">I", index)
+
+
 def create_derivation_proof(
     dev_kp: Ed25519Keypair,
     agent_pub: Ed25519PublicKey,
@@ -206,47 +223,37 @@ def create_derivation_proof(
     """
     Create a proof that an agent key was derived from a developer key.
 
-    The developer signs a message binding the agent's public key to the derivation index.
+    The developer signs (agent_public_key_bytes || big_endian_uint32(index)),
+    matching the Go registry's buildProofMessage format.
     """
     agent_pub_bytes = agent_pub.public_bytes(
         encoding=serialization.Encoding.Raw,
         format=serialization.PublicFormat.Raw,
     )
-    agent_pub_b64 = base64.b64encode(agent_pub_bytes).decode()
 
-    message = json.dumps(
-        {
-            "agent_public_key": agent_pub_b64,
-            "developer_public_key": dev_kp.public_key_b64,
-            "index": index,
-        },
-        sort_keys=True,
-    ).encode()
-
+    message = _build_proof_message(agent_pub_bytes, index)
     signature = sign(dev_kp.private_key, message)
 
     return {
-        "developer_public_key": dev_kp.public_key_b64,
-        "agent_public_key": agent_pub_b64,
-        "index": index,
-        "signature": signature,
+        "developer_public_key": dev_kp.public_key_string,
+        "agent_index": index,
+        "developer_signature": signature,
     }
 
 
 def verify_derivation_proof(proof: dict, agent_pub_b64: str) -> bool:
     """
     Verify that a derivation proof is valid for the given agent public key.
+    Matches Go identity.go:VerifyDerivationProof.
     """
-    if proof.get("agent_public_key") != agent_pub_b64:
-        return False
+    agent_pub_bytes = base64.b64decode(agent_pub_b64)
+    index = proof.get("agent_index", proof.get("index", 0))
+    message = _build_proof_message(agent_pub_bytes, index)
 
-    message = json.dumps(
-        {
-            "agent_public_key": proof["agent_public_key"],
-            "developer_public_key": proof["developer_public_key"],
-            "index": proof["index"],
-        },
-        sort_keys=True,
-    ).encode()
+    dev_pub = proof["developer_public_key"]
+    # Strip ed25519: prefix if present for verification
+    if dev_pub.startswith("ed25519:"):
+        dev_pub = dev_pub[8:]
 
-    return verify(proof["developer_public_key"], message, proof["signature"])
+    sig = proof.get("developer_signature", proof.get("signature", ""))
+    return verify(dev_pub, message, sig)

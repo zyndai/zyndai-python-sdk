@@ -164,8 +164,14 @@ def update_agent(
     PUT /v1/agents/{agent_id} with Authorization: Bearer ed25519:<sig>
 
     The server verifies the Bearer signature against the request body bytes.
+    Adds a body-level signature over the update fields, then signs the full
+    body for the Authorization header.
     """
-    # Serialize body first so we can sign the exact bytes the server will verify
+    # Sign the update content (excluding signature field itself)
+    signable_bytes = json.dumps(updates, sort_keys=True, separators=(",", ":")).encode()
+    updates["signature"] = sign(keypair.private_key, signable_bytes)
+
+    # Serialize full body (with signature) and sign for auth header
     body_bytes = json.dumps(updates, sort_keys=True, separators=(",", ":")).encode()
     auth_sig = sign(keypair.private_key, body_bytes)
 
@@ -177,7 +183,7 @@ def update_agent(
     try:
         resp = requests.put(
             f"{registry_url}/v1/agents/{agent_id}",
-            data=body_bytes,  # send raw bytes to match what we signed
+            data=body_bytes,
             headers=headers,
         )
         if resp.status_code == 200:
@@ -372,6 +378,35 @@ def get_registry_info(registry_url: str) -> Optional[dict]:
         return None
     except requests.RequestException as e:
         logger.error(f"Request failed: {e}")
+        return None
+
+
+def get_agent_fqan(registry_url: str, agent_id: str) -> Optional[str]:
+    """
+    Look up the FQAN (Fully Qualified Agent Name) for an agent.
+    Checks if the agent has a ZNS name binding and returns the FQAN string
+    (e.g., "dns01.zynd.ai/acme-corp/doc-translator").
+
+    Returns None if the agent has no name binding.
+    """
+    try:
+        # Search for the agent to get FQAN from search results
+        resp = requests.post(
+            f"{registry_url}/v1/search",
+            json={"query": agent_id, "max_results": 1, "enrich": False},
+            headers={"Content-Type": "application/json"},
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            results = data.get("results", [])
+            for r in results:
+                if r.get("agent_id") == agent_id:
+                    fqan = r.get("fqan", "")
+                    if fqan:
+                        return fqan
+        return None
+    except requests.RequestException:
         return None
 
 

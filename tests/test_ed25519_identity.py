@@ -187,5 +187,5 @@ class TestDerivationProof:
         agent_kp = derive_agent_keypair(dev_kp.private_key, 5)
 
         proof = create_derivation_proof(dev_kp, agent_kp.public_key, 5)
-        proof["index"] = 99  # Tamper
+        proof["agent_index"] = 99  # Tamper
         assert verify_derivation_proof(proof, agent_kp.public_key_b64) is False

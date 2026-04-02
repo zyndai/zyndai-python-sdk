@@ -246,7 +246,6 @@ def resolve_card_from_config(agent_config) -> dict:
 
     card["registry"] = {
         "url": getattr(agent_config, "registry_url", "https://dns01.zynd.ai"),
-        "auto_register": getattr(agent_config, "auto_register", True),
     }
 
     return card

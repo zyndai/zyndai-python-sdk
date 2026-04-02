@@ -16,9 +16,16 @@ from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from dotenv import load_dotenv
+import json
 import os
 
 load_dotenv()
+
+# Load agent.config.json for runtime settings
+_config = {}
+if os.path.exists("agent.config.json"):
+    with open("agent.config.json") as _f:
+        _config = json.load(_f)
 
 
 def create_agent():
@@ -47,19 +54,19 @@ def create_agent():
 
 if __name__ == "__main__":
     agent_config = AgentConfig(
-        name="__AGENT_NAME__",
-        description="__AGENT_NAME__ — a LangGraph agent on the ZyndAI network.",
+        name=_config.get("name", "__AGENT_NAME__"),
+        description=_config.get("description", "__AGENT_NAME__ — a LangGraph agent on the ZyndAI network."),
         capabilities={
             "ai": ["nlp", "langgraph"],
             "protocols": ["http"],
         },
-        category="general",
-        tags=["langgraph"],
-        summary="__AGENT_NAME__ agent",
+        category=_config.get("category", "general"),
+        tags=_config.get("tags", ["langgraph"]),
+        summary=_config.get("summary", "__AGENT_NAME__ agent"),
         webhook_host="0.0.0.0",
-        webhook_port=5000,
-        registry_url=os.environ.get("ZYND_REGISTRY_URL", "http://localhost:8080"),
-        auto_register=True,
+        webhook_port=_config.get("webhook_port", 5000),
+        registry_url=os.environ.get("ZYND_REGISTRY_URL", _config.get("registry_url", "http://localhost:8080")),
+        keypair_path=os.environ.get("ZYND_AGENT_KEYPAIR_PATH", _config.get("keypair_path")),
     )
 
     zynd_agent = ZyndAIAgent(agent_config=agent_config)

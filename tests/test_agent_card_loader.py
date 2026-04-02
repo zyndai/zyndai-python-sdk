@@ -47,7 +47,6 @@ SAMPLE_CARD = {
     },
     "registry": {
         "url": "https://dns01.zynd.ai",
-        "auto_register": True,
     },
 }
 
@@ -200,7 +199,6 @@ class TestResolveCardFromConfig:
             webhook_url: Optional[str] = None
             use_ngrok: bool = False
             registry_url: str = "https://dns01.zynd.ai"
-            auto_register: bool = True
 
         config = FakeConfig()
         card = resolve_card_from_config(config)

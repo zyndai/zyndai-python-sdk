@@ -9,6 +9,7 @@ from zyndai_agent.ed25519_identity import (
     load_keypair,
     derive_agent_keypair,
     create_derivation_proof,
+    generate_developer_id,
     save_keypair,
 )
 from zyndai_agent.dns_registry import register_agent
@@ -63,7 +64,7 @@ def run(args: argparse.Namespace):
         dev_kp = load_keypair(str(dev_key))
         kp = derive_agent_keypair(dev_kp.private_key, args.index)
         developer_proof = create_derivation_proof(dev_kp, kp.public_key, args.index)
-        developer_id = dev_kp.agent_id
+        developer_id = generate_developer_id(dev_kp.public_key_bytes)
 
         # Save derived agent keypair
         agent_file = agents_dir() / f"agent-{args.index}.json"
@@ -77,7 +78,7 @@ def run(args: argparse.Namespace):
         index = _next_agent_index()
         kp = derive_agent_keypair(dev_kp.private_key, index)
         developer_proof = create_derivation_proof(dev_kp, kp.public_key, index)
-        developer_id = dev_kp.agent_id
+        developer_id = generate_developer_id(dev_kp.public_key_bytes)
 
         agent_file = agents_dir() / f"agent-{index}.json"
         save_keypair(kp, str(agent_file))
@@ -139,7 +140,7 @@ def _register_from_card(args: argparse.Namespace):
         if dev_key.exists():
             dev_kp = load_keypair(str(dev_key))
             developer_proof = create_derivation_proof(dev_kp, kp.public_key, derivation["index"])
-            developer_id = dev_kp.agent_id
+            developer_id = generate_developer_id(dev_kp.public_key_bytes)
 
     # Get agent URL from args or card
     agent_url = args.agent_url

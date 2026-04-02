@@ -13,7 +13,7 @@ from zyndai_agent.ed25519_identity import (
     save_keypair,
     derive_agent_keypair,
     create_derivation_proof,
-    generate_agent_id,
+    generate_developer_id,
     sign as ed25519_sign,
 )
 from zyndai_agent.dns_registry import (
@@ -21,6 +21,7 @@ from zyndai_agent.dns_registry import (
     get_agent,
     update_agent,
     check_agent_name_available,
+    get_agent_fqan,
 )
 from zynd_cli.config import (
     developer_key_path,
@@ -128,9 +129,10 @@ def _agent_init(args: argparse.Namespace):
                 if kp_file.exists():
                     try:
                         _, meta = load_keypair_with_metadata(str(kp_file))
-                        idx = meta.get("derived_from", {}).get("index")
-                        if idx is not None:
-                            used_indices.add(idx)
+                        if meta is not None:
+                            idx = meta.get("index")
+                            if idx is not None:
+                                used_indices.add(idx)
                     except Exception:
                         pass
         index = 0
@@ -188,7 +190,6 @@ def _agent_init(args: argparse.Namespace):
         "registry_url": registry_url,
         "keypair_path": str(kp_path),
         "agent_index": index,
-        "auto_register": True,
     }
 
     with open("agent.config.json", "w") as f:
@@ -244,10 +245,11 @@ def _agent_init(args: argparse.Namespace):
     if fw_info.get("env_keys"):
         console.print(f"  [dim]{step}.[/dim] Add your API keys to [bold].env[/bold]")
         step += 1
+    console.print(f"  [dim]{step}.[/dim] Register your agent:")
+    console.print(f"     [bold #8B5CF6]zynd agent register[/bold #8B5CF6]")
+    step += 1
     console.print(f"  [dim]{step}.[/dim] Run your agent:")
-    console.print(f"     [bold #8B5CF6]python agent.py[/bold #8B5CF6]")
-    console.print()
-    console.print(f"  [dim]The agent will auto-register on the network when it starts.[/dim]")
+    console.print(f"     [bold #8B5CF6]zynd agent run[/bold #8B5CF6]")
 
 
 def _agent_register(args: argparse.Namespace):
@@ -273,10 +275,11 @@ def _agent_register(args: argparse.Namespace):
     # Check if already registered
     print(f"Checking registry at {registry_url}...")
     existing = get_agent(registry_url, kp.agent_id)
-    if existing:
+    already_registered = existing is not None
+
+    if already_registered:
         print(f"Agent already registered: {kp.agent_id}")
-        print(f"  Name: {existing.get('name', '?')}")
-        return
+        print(f"  Updating registration...")
 
     # Load developer key for proof
     dev_key = developer_key_path()
@@ -294,7 +297,7 @@ def _agent_register(args: argparse.Namespace):
     proof = create_derivation_proof(dev_kp, kp.public_key, agent_index)
 
     # Build developer ID from developer public key
-    dev_id = "agdns:dev:" + generate_agent_id(dev_kp.public_key_bytes).replace("agdns:", "")
+    dev_id = generate_developer_id(dev_kp.public_key_bytes)
 
     agent_url = args.agent_url or config.get("agent_url", f"http://localhost:{config.get('webhook_port', 5000)}")
 
@@ -337,29 +340,55 @@ def _agent_register(args: argparse.Namespace):
         except Exception as e:
             print(f"  Warning: Could not check agent name availability: {e}")
 
-    print(f"Registering agent on the network...")
-    try:
-        agent_id = register_agent(
-            registry_url=registry_url,
-            keypair=kp,
-            name=config["name"],
-            agent_url=agent_url,
-            category=config.get("category", "general"),
-            tags=config.get("tags", []),
-            summary=config.get("summary", ""),
-            developer_id=dev_id,
-            developer_proof=proof,
-            agent_name=agent_name_zns,
-        )
-        print(f"\nAgent registered!")
-        print(f"  Agent ID: {agent_id}")
-        print(f"  Name:     {config['name']}")
-        if agent_name_zns:
-            print(f"  ZNS Name: {agent_name_zns}")
-        print(f"  URL:      {agent_url}")
-    except Exception as e:
-        print(f"Registration failed: {e}", file=sys.stderr)
-        sys.exit(1)
+    if already_registered:
+        # Update the existing registration with correct data
+        print(f"Updating agent on the network...")
+        update_body = {
+            "name": config["name"],
+            "agent_url": agent_url,
+            "category": config.get("category", "general"),
+            "tags": config.get("tags", []),
+            "summary": config.get("summary", ""),
+        }
+        success = update_agent(registry_url, kp.agent_id, kp, update_body)
+        if success:
+            fqan = get_agent_fqan(registry_url, kp.agent_id)
+            print(f"\nAgent updated!")
+            print(f"  Agent ID: {kp.agent_id}")
+            if fqan:
+                print(f"  FQAN:     {fqan}")
+            print(f"  Name:     {config['name']}")
+            print(f"  URL:      {agent_url}")
+        else:
+            print(f"Update failed.", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print(f"Registering agent on the network...")
+        try:
+            agent_id = register_agent(
+                registry_url=registry_url,
+                keypair=kp,
+                name=config["name"],
+                agent_url=agent_url,
+                category=config.get("category", "general"),
+                tags=config.get("tags", []),
+                summary=config.get("summary", ""),
+                developer_id=dev_id,
+                developer_proof=proof,
+                agent_name=agent_name_zns,
+            )
+            fqan = get_agent_fqan(registry_url, agent_id)
+            print(f"\nAgent registered!")
+            print(f"  Agent ID: {agent_id}")
+            if fqan:
+                print(f"  FQAN:     {fqan}")
+            print(f"  Name:     {config['name']}")
+            if agent_name_zns:
+                print(f"  ZNS Name: {agent_name_zns}")
+            print(f"  URL:      {agent_url}")
+        except Exception as e:
+            print(f"Registration failed: {e}", file=sys.stderr)
+            sys.exit(1)
 
 
 def _agent_update(args: argparse.Namespace):
@@ -398,10 +427,11 @@ def _agent_update(args: argparse.Namespace):
     console.print(f"  [dim]Hash:[/dim] {codebase_hash[:16]}...")
 
     # Build update payload from config
-    agent_url = config.get("agent_url", f"http://localhost:{config.get('webhook_port', 5001)}")
+    agent_url = config.get("agent_url", f"http://localhost:{config.get('webhook_port', 5000)}")
 
-    # Build signable update body
+    # Build update body — all mutable fields from agent.config.json
     update_body = {
+        "name": config.get("name", ""),
         "agent_url": agent_url,
         "category": config.get("category", "general"),
         "tags": config.get("tags", []),
@@ -409,23 +439,18 @@ def _agent_update(args: argparse.Namespace):
         "codebase_hash": codebase_hash,
     }
 
-    # Sign the update body
-    signable_bytes = json.dumps(update_body, sort_keys=True, separators=(",", ":")).encode()
-    signature = ed25519_sign(kp.private_key, signable_bytes)
-    update_body["signature"] = signature
-
-    # Push to registry
+    # Push to registry (update_agent handles signing + auth)
     console.print(f"  [dim]Pushing update to registry...[/dim]")
     success = update_agent(registry_url, kp.agent_id, kp, update_body)
 
     if success:
         console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent updated on registry")
         console.print(f"  [dim]Agent ID:[/dim]      {kp.agent_id}")
+        console.print(f"  [dim]Name:[/dim]          {config.get('name', '')}")
+        console.print(f"  [dim]Agent URL:[/dim]     {agent_url}")
         console.print(f"  [dim]Category:[/dim]      {config.get('category', 'general')}")
         console.print(f"  [dim]Tags:[/dim]          {', '.join(config.get('tags', []))}")
         console.print(f"  [dim]Codebase hash:[/dim] {codebase_hash[:16]}...")
-        console.print()
-        console.print(f"  [dim].well-known/agent.json is managed by the SDK at runtime.[/dim]")
     else:
         console.print(f"  [bold red]✗[/bold red] Update failed")
         sys.exit(1)
