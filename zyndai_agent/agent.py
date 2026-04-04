@@ -13,6 +13,7 @@ from zyndai_agent.communication import AgentCommunicationManager
 from zyndai_agent.webhook_communication import WebhookCommunicationManager
 from zyndai_agent.payment import X402PaymentProcessor
 from zyndai_agent.config_manager import ConfigManager
+from zyndai_agent.session import SessionManager
 from zyndai_agent.ed25519_identity import (
     Ed25519Keypair,
     keypair_from_private_bytes,
@@ -96,6 +97,11 @@ class AgentConfig(BaseModel):
 
     price: Optional[str] = None
 
+    # ZyndPay integration (optional — pip install zyndai-agent[zyndpay])
+    payment_policy: Optional[Any] = None       # PaymentPolicy from zyndpay
+    verify_signatures: bool = False            # Verify Ed25519 signatures on incoming webhooks
+    zyndpay_api_url: Optional[str] = None      # ZyndPay API URL for smart routing
+
     # Config directory for agent identity (allows multiple agents in same project)
     config_dir: Optional[str] = None
 
@@ -168,6 +174,10 @@ class ZyndAIAgent(
             IdentityManager.__init__(self, agent_config.registry_url)
             SearchAndDiscoveryManager.__init__(self, registry_url=agent_config.registry_url)
 
+        # ZyndPay smart routing (optional — when zyndpay is installed + configured)
+        self.payment_router = None
+        self._init_zyndpay(agent_config)
+
         # Build card dict from AgentConfig (used for serving and self-registration)
         self._static_card = resolve_card_from_config(agent_config)
 
@@ -200,6 +210,9 @@ class ZyndAIAgent(
                 use_ngrok=agent_config.use_ngrok,
                 ngrok_auth_token=agent_config.ngrok_auth_token or os.environ.get("NGROK_AUTH_TOKEN"),
             )
+
+            self._session_manager = SessionManager()
+            self._verify_signatures = agent_config.verify_signatures
 
         elif agent_config.mqtt_broker_url is not None:
             self.communication_mode = "mqtt"
@@ -277,6 +290,21 @@ class ZyndAIAgent(
         self.custom_invoke_fn = invoke_fn
         self.agent_framework = AgentFramework.CUSTOM
 
+    def get_session(self, conversation_id: str):
+        if hasattr(self, "_session_manager"):
+            return self._session_manager.get_session(conversation_id)
+        return None
+
+    @property
+    def active_sessions(self) -> list:
+        if hasattr(self, "_session_manager"):
+            return self._session_manager.active_sessions
+        return []
+
+    @property
+    def sessions(self):
+        return getattr(self, "_session_manager", None)
+
     def invoke(self, input_text: str, **kwargs) -> str:
         """
         Invoke the agent with the given input, regardless of framework.
@@ -325,6 +353,48 @@ class ZyndAIAgent(
 
         else:
             raise ValueError(f"Unknown agent framework: {self.agent_framework}")
+
+    def _init_zyndpay(self, agent_config: AgentConfig):
+        """Initialize ZyndPay PaymentRouter if installed and configured."""
+        try:
+            from zyndpay import PaymentRouter, PaymentPolicy
+            from zyndpay.adapters.x402_adapter import X402Adapter
+            from zyndpay.adapters.escrow_adapter import EscrowAdapter
+
+            policy = agent_config.payment_policy
+            if policy is None:
+                policy = PaymentPolicy()
+
+            router = PaymentRouter(policy=policy)
+
+            if self.keypair:
+                from zyndai_agent.utils import private_key_from_base64
+                import base64
+                seed_b64 = base64.b64encode(self.keypair.private_key_bytes).decode()
+                eth_private_key = private_key_from_base64(seed_b64)
+
+                x402_adapter = X402Adapter(
+                    private_key=eth_private_key,
+                )
+                router.register_adapter(x402_adapter)
+
+                try:
+                    escrow_adapter = EscrowAdapter(
+                        private_key=eth_private_key,
+                    )
+                    router.register_adapter(escrow_adapter)
+                    _log_ok("Escrow adapter registered (high-value/low-trust → on-chain escrow)")
+                except Exception as e:
+                    _log_warn(f"Escrow adapter disabled: {e}")
+
+            self.payment_router = router
+            _log_ok("ZyndPay PaymentRouter initialized (smart routing enabled)")
+
+        except ImportError:
+            # zyndpay not installed — x402 direct mode only
+            pass
+        except Exception as e:
+            _log_warn(f"ZyndPay init failed: {e} — falling back to x402 direct")
 
     def _start_heartbeat(self, registry_url: str):
         """Start a background thread that sends WebSocket heartbeats to the registry."""
@@ -471,6 +541,8 @@ class ZyndAIAgent(
             elif self.agent_config.use_ngrok:
                 _console.print(f"  [dim]Ngrok[/dim]        [yellow]Configured (not connected)[/yellow]")
             _console.print(f"  [dim]Price[/dim]        {price}")
+            payment_mode = "ZyndPay (smart routing)" if self.payment_router else "x402 (direct)"
+            _console.print(f"  [dim]Payment[/dim]      {payment_mode}")
             _console.print()
         else:
             border = "=" * 60

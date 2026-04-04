@@ -1,4 +1,5 @@
 import time
+import inspect
 import logging
 import threading
 import requests
@@ -81,9 +82,14 @@ class WebhookCommunicationManager:
         self.message_handlers = []
         self.target_webhook_url = None
         self.pending_responses = {}  # Store responses by message_id
+        self._pending_events: Dict[str, threading.Event] = {}
 
         # Thread safety
         self._lock = threading.Lock()
+
+        # Optional features wired by ZyndAIAgent
+        self._verify_signatures: bool = False
+        self._session_manager = None
 
         # Create Flask app
         self.flask_app = Flask(f"agent_{agent_id}")
@@ -165,23 +171,36 @@ class WebhookCommunicationManager:
     def _handle_webhook_request(self, sync=False):
         """Handle incoming webhook POST requests."""
         try:
-            # Verify request is JSON
             if not request.is_json:
                 logger.error("Received non-JSON request")
                 return jsonify({"error": "Content-Type must be application/json"}), 400
 
             payload = request.get_json()
 
-            # Parse message from dict (request.get_json() returns a dict, not a string)
-            message = AgentMessage.from_dict(payload)
+            if self._verify_signatures:
+                sig_error = self._verify_incoming_signature(payload)
+                if sig_error:
+                    return sig_error
+
+            # Typed messages (InvokeMessage etc.) store content inside payload,
+            # not at the top level — AgentMessage.from_dict would lose it.
+            if "type" in payload:
+                from zyndai_agent.typed_messages import parse_message, typed_to_legacy
+                try:
+                    typed_msg = parse_message(payload)
+                    message = typed_to_legacy(typed_msg)
+                    message._typed = typed_msg
+                except Exception as e:
+                    logger.warning(f"[{self.agent_id}] Typed message parse failed, falling back to legacy: {e}")
+                    message = AgentMessage.from_dict(payload)
+            else:
+                message = AgentMessage.from_dict(payload)
 
             logger.info(f"[{self.agent_id}] Received message from {message.sender_id}")
 
-            # Auto-connect to sender if not connected
             if not self.is_agent_connected:
                 self.is_agent_connected = True
 
-            # Store in history
             message_with_metadata = {
                 "message": message,
                 "received_at": time.time(),
@@ -195,40 +214,40 @@ class WebhookCommunicationManager:
                 self.received_messages.append(message_with_metadata)
                 self.message_history.append(message_with_metadata)
 
-                # Maintain history limit
                 if len(self.message_history) > self.message_history_limit:
                     self.message_history = self.message_history[
                         -self.message_history_limit :
                     ]
 
-            # Check if synchronous response is requested
+            session = None
+            if self._session_manager is not None:
+                session = self._session_manager.get_or_create(
+                    message.conversation_id, message.sender_id
+                )
+                session.add_message(message)
+
             if sync:
-                # Wait for handler to process and store response
-                # Invoke message handlers synchronously
-                for handler in self.message_handlers:
-                    try:
-                        handler(message, None)  # No topic in webhook context
-                    except Exception as e:
-                        logger.error(f"Error in message handler: {e}")
+                event = threading.Event()
+                with self._lock:
+                    self._pending_events[message.message_id] = event
 
-                # Wait for response (with timeout)
-                timeout = 30  # 30 seconds
-                start_time = time.time()
-                while time.time() - start_time < timeout:
-                    with self._lock:
-                        if message.message_id in self.pending_responses:
-                            response = self.pending_responses.pop(message.message_id)
-                            return jsonify(
-                                {
-                                    "status": "success",
-                                    "message_id": message.message_id,
-                                    "response": response,
-                                    "timestamp": time.time(),
-                                }
-                            ), 200
-                    time.sleep(0.1)  # Small delay to avoid busy waiting
+                self._dispatch_to_handlers(message, session)
 
-                # Timeout - no response received
+                event.wait(timeout=30)
+
+                with self._lock:
+                    self._pending_events.pop(message.message_id, None)
+                    if message.message_id in self.pending_responses:
+                        response = self.pending_responses.pop(message.message_id)
+                        return jsonify(
+                            {
+                                "status": "success",
+                                "message_id": message.message_id,
+                                "response": response,
+                                "timestamp": time.time(),
+                            }
+                        ), 200
+
                 return jsonify(
                     {
                         "status": "timeout",
@@ -238,14 +257,8 @@ class WebhookCommunicationManager:
                     }
                 ), 408
             else:
-                # Async mode - invoke handlers and return immediately
-                for handler in self.message_handlers:
-                    try:
-                        handler(message, None)  # No topic in webhook context
-                    except Exception as e:
-                        logger.error(f"Error in message handler: {e}")
+                self._dispatch_to_handlers(message, session)
 
-                # Return success
                 return jsonify(
                     {
                         "status": "received",
@@ -257,6 +270,47 @@ class WebhookCommunicationManager:
         except Exception as e:
             logger.error(f"Error handling webhook request: {e}")
             return jsonify({"error": str(e)}), 500
+
+    def _verify_incoming_signature(self, payload: dict):
+        """Verify Ed25519 signature on incoming typed message. Returns Flask error response or None."""
+        if "type" not in payload:
+            return None
+
+        from zyndai_agent.typed_messages import parse_message
+        from zyndai_agent.signatures import verify_message
+
+        try:
+            typed_msg = parse_message(payload)
+        except Exception as e:
+            logger.warning(f"[{self.agent_id}] Failed to parse typed message for signature verification: {e}")
+            return jsonify({"error": "Malformed typed message"}), 400
+
+        if not typed_msg.signature or not typed_msg.sender_public_key:
+            return None
+
+        pub_b64 = typed_msg.sender_public_key
+        if pub_b64.startswith("ed25519:"):
+            pub_b64 = pub_b64[len("ed25519:"):]
+        if not verify_message(typed_msg, pub_b64):
+            return jsonify({"error": "Invalid signature"}), 401
+
+        return None
+
+    def _dispatch_to_handlers(self, message: AgentMessage, session=None):
+        """Invoke registered handlers, passing session to 3-arg handlers."""
+        for handler in self.message_handlers:
+            try:
+                param_count = len(inspect.signature(handler).parameters)
+            except (ValueError, TypeError):
+                param_count = 2
+
+            try:
+                if param_count >= 3 and session is not None:
+                    handler(message, None, session)
+                else:
+                    handler(message, None)
+            except Exception as e:
+                logger.error(f"[{self.agent_id}] Handler {handler!r} raised: {e}")
 
     def start_webhook_server(self):
         """Start Flask webhook server in background thread."""
@@ -519,6 +573,9 @@ class WebhookCommunicationManager:
         """
         with self._lock:
             self.pending_responses[message_id] = response
+            event = self._pending_events.get(message_id)
+            if event:
+                event.set()
         logger.info(f"[{self.agent_id}] Set response for message {message_id}")
 
     def get_connection_status(self) -> Dict[str, Any]:
