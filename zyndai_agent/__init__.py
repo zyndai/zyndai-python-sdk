@@ -18,6 +18,31 @@ from zyndai_agent.agent_card_loader import (
 )
 from zyndai_agent import dns_registry as DNSRegistryClient
 
+from zyndai_agent.typed_messages import (
+    TypedMessage,
+    MessageBase,
+    InvokeMessage,
+    InvokeResponse,
+    StreamChunk,
+    TaskAssignment,
+    TaskNotification,
+    ShutdownRequest,
+    ShutdownResponse,
+    parse_message,
+    typed_to_legacy,
+)
+from zyndai_agent.signatures import sign_message, verify_message
+from zyndai_agent.session import AgentSession, SessionManager
+from zyndai_agent.orchestration.task import Task, TaskStatus, TaskTracker
+from zyndai_agent.orchestration.fan_out import fan_out, FanOutResult
+from zyndai_agent.orchestration.coordinator import Coordinator, OrchestrationContext
+
+try:
+    from zyndpay import PaymentPolicy, PaymentRouter
+except ImportError:
+    PaymentPolicy = None
+    PaymentRouter = None
+
 __all__ = [
     "ZyndAIAgent",
     "AgentConfig",
@@ -43,4 +68,26 @@ __all__ = [
     "resolve_card_from_config",
     "load_derivation_metadata",
     "DNSRegistryClient",
+    "TypedMessage",
+    "MessageBase",
+    "InvokeMessage",
+    "InvokeResponse",
+    "StreamChunk",
+    "TaskAssignment",
+    "TaskNotification",
+    "ShutdownRequest",
+    "ShutdownResponse",
+    "parse_message",
+    "typed_to_legacy",
+    "sign_message",
+    "verify_message",
+    "AgentSession",
+    "SessionManager",
+    "Task",
+    "TaskStatus",
+    "TaskTracker",
+    "fan_out",
+    "FanOutResult",
+    "Coordinator",
+    "OrchestrationContext",
 ]
