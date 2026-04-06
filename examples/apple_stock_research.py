@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-ZyndAI Market Research Demo — Apple Stock Analysis
+ZyndAI Market Research Demo — Apple Stock Analysis (Real Data)
 
-3 specialist agents + 1 coordinator analyze AAPL:
-  - Data Collector: fetches price history, financials, key metrics
-  - Sentiment Analyst: analyzes market sentiment, news, social signals
-  - Strategy Advisor: produces buy/hold/sell recommendation with rationale
+3 specialist agents + 1 coordinator analyze AAPL using real public APIs:
+  - Data Collector: Yahoo Finance — live price, financials, margins, history
+  - Sentiment Analyst: Yahoo Finance news + GPT-4o-mini sentiment scoring
+  - Strategy Advisor: GPT-4o-mini recommendation based on real data
 
 Run:
     cd zyndai-agent
@@ -23,7 +23,6 @@ import textwrap
 import io
 import builtins
 import requests
-from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -31,6 +30,8 @@ load_dotenv()
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.getLogger("WebhookAgentCommunication").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
+logging.getLogger("yfinance").setLevel(logging.ERROR)
+logging.getLogger("peewee").setLevel(logging.ERROR)
 
 _real_print = builtins.print
 
@@ -54,6 +55,7 @@ from zyndai_agent.session import AgentSession
 from zyndai_agent.typed_messages import generate_id
 
 REGISTRY_URL = os.getenv("REGISTRY_URL", "https://dns01.zynd.ai")
+TICKER = os.getenv("TICKER", "AAPL")
 
 _llm = None
 try:
@@ -108,23 +110,19 @@ def divider(label=""):
     _real_print()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  LLM
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def ask_llm(agent_name, system, prompt, max_tokens=400):
-    if _llm:
-        log(agent_name, "Calling GPT-4o-mini...")
-        resp = _llm.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-            max_tokens=max_tokens, temperature=0.7,
-        )
-        answer = resp.choices[0].message.content.strip()
-        tokens = resp.usage.total_tokens if resp.usage else 0
-        log(agent_name, f"LLM responded ({tokens} tokens)")
-        return answer
-    return ""
+    if not _llm:
+        return ""
+    log(agent_name, "Calling GPT-4o-mini for analysis...")
+    resp = _llm.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+        max_tokens=max_tokens, temperature=0.4,
+    )
+    answer = resp.choices[0].message.content.strip()
+    tokens = resp.usage.total_tokens if resp.usage else 0
+    log(agent_name, f"LLM responded ({tokens} tokens)")
+    return answer
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -136,7 +134,7 @@ def base_url(agent):
 
 
 def boot_agent(tmpdir, name, desc, skills, category, port):
-    log("SYSTEM", f"Booting {name}...", f"port={port}  skills={skills}")
+    log("SYSTEM", f"Booting {name}...", f"port={port}")
     d = os.path.join(tmpdir, name)
     os.makedirs(d, exist_ok=True)
     with _Quiet():
@@ -149,7 +147,7 @@ def boot_agent(tmpdir, name, desc, skills, category, port):
         ))
     url = base_url(agent)
     log("SYSTEM", f"{GREEN}✓{RESET} {name} online at {CYAN}{url}{RESET}",
-        f"id={agent.agent_id}  key={agent.keypair.public_key_b64[:16]}...")
+        f"id={agent.agent_id[:24]}...")
     dns_registry.update_agent(REGISTRY_URL, agent.agent_id, agent.keypair, {"agent_url": url})
     return agent
 
@@ -165,108 +163,154 @@ def _extract(msg):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Worker Handlers
+#  Data Collector — Yahoo Finance (real data, no LLM)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def data_handler(agent):
     def handler(msg, topic, session):
         task = _extract(msg)
-        log("DATA", f"Received: \"{task[:70]}...\"")
+        log("DATA", f"Received task: \"{task[:60]}...\"")
+        log("DATA", f"Fetching live data from Yahoo Finance for {TICKER}...")
 
-        if _llm:
-            answer = ask_llm("DATA",
-                "You are a financial data analyst specializing in stock market data. "
-                "Return ONLY valid JSON (no markdown) with these keys: "
-                "ticker (str), current_price (float), price_52w_high (float), price_52w_low (float), "
-                "pe_ratio (float), market_cap_billions (float), revenue_growth_yoy (str), "
-                "eps (float), dividend_yield (str), key_metrics (list of 3 strings).",
-                f"Provide current financial data and key metrics for: {task}",
-            )
-            answer = answer.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-            try:
-                result = json.loads(answer)
-            except json.JSONDecodeError:
-                result = _data_fallback()
-        else:
-            log("DATA", "Fetching data with built-in logic...")
-            time.sleep(0.8)
-            result = _data_fallback()
+        import yfinance as yf
+        t = yf.Ticker(TICKER)
+        info = t.info
 
-        log("DATA", f"{GREEN}✓{RESET} Data ready — {list(result.keys())}")
+        current = info.get("currentPrice", 0)
+        prev_close = info.get("previousClose", 0)
+        change_pct = ((current - prev_close) / prev_close * 100) if prev_close else 0
+
+        result = {
+            "ticker": TICKER,
+            "company": info.get("shortName", TICKER),
+            "current_price": current,
+            "previous_close": prev_close,
+            "change_pct": round(change_pct, 2),
+            "price_52w_high": info.get("fiftyTwoWeekHigh", 0),
+            "price_52w_low": info.get("fiftyTwoWeekLow", 0),
+            "pe_ratio": round(info.get("trailingPE", 0), 2),
+            "forward_pe": round(info.get("forwardPE", 0), 2),
+            "market_cap_billions": round(info.get("marketCap", 0) / 1e9, 1),
+            "revenue_growth_yoy": f"{info.get('revenueGrowth', 0) * 100:.1f}%",
+            "eps_ttm": info.get("trailingEps", 0),
+            "forward_eps": info.get("forwardEps", 0),
+            "dividend_yield": f"{(info.get('dividendYield', 0) or 0) * 100:.2f}%",
+            "gross_margin": f"{(info.get('grossMargins', 0) or 0) * 100:.1f}%",
+            "operating_margin": f"{(info.get('operatingMargins', 0) or 0) * 100:.1f}%",
+            "profit_margin": f"{(info.get('profitMargins', 0) or 0) * 100:.1f}%",
+            "return_on_equity": f"{(info.get('returnOnEquity', 0) or 0) * 100:.1f}%",
+            "debt_to_equity": info.get("debtToEquity", 0),
+            "free_cash_flow_billions": round(info.get("freeCashflow", 0) / 1e9, 1),
+            "beta": info.get("beta", 0),
+            "avg_volume_millions": round(info.get("averageVolume", 0) / 1e6, 1),
+            "sector": info.get("sector", ""),
+            "industry": info.get("industry", ""),
+        }
+
+        log("DATA", f"{GREEN}✓{RESET} Live data: ${current} | PE {result['pe_ratio']} | MCap ${result['market_cap_billions']}B")
         agent.set_response(msg.message_id, json.dumps(result))
     return handler
 
 
-def _data_fallback():
-    return {
-        "ticker": "AAPL",
-        "current_price": 228.50,
-        "price_52w_high": 260.10,
-        "price_52w_low": 164.08,
-        "pe_ratio": 37.8,
-        "market_cap_billions": 3480,
-        "revenue_growth_yoy": "+4.3%",
-        "eps": 6.04,
-        "dividend_yield": "0.44%",
-        "key_metrics": [
-            "Services revenue hit $26.3B in Q1 2025, up 14% YoY",
-            "iPhone revenue declined 1% but ASP increased",
-            "Gross margin expanded to 46.9%, highest in a decade",
-        ],
-    }
-
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Sentiment Analyst — Yahoo Finance News + GPT-4o-mini Analysis
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def sentiment_handler(agent):
     def handler(msg, topic, session):
         task = _extract(msg)
-        log("SENTIMENT", f"Received: \"{task[:70]}...\"")
+        log("SENTIMENT", f"Received task: \"{task[:60]}...\"")
+        log("SENTIMENT", f"Fetching news and analyst data from Yahoo Finance...")
 
-        if _llm:
-            answer = ask_llm("SENTIMENT",
-                "You are a market sentiment analyst. You analyze news, social media, analyst ratings, and institutional flow. "
-                "Return ONLY valid JSON (no markdown) with these keys: "
-                "overall_sentiment (str: bullish/neutral/bearish), confidence (float 0-1), "
-                "analyst_consensus (str), price_target_avg (float), "
-                "bull_signals (list of 3 strings), bear_signals (list of 2 strings), "
-                "recent_news (list of 2 strings).",
-                f"Analyze current market sentiment for: {task}",
+        import yfinance as yf
+        t = yf.Ticker(TICKER)
+        info = t.info
+
+        # Real analyst recommendations
+        analyst_target = info.get("targetMeanPrice", 0)
+        analyst_high = info.get("targetHighPrice", 0)
+        analyst_low = info.get("targetLowPrice", 0)
+        analyst_count = info.get("numberOfAnalystOpinions", 0)
+        rec_key = info.get("recommendationKey", "none")
+
+        # Real recommendation breakdown
+        recs = t.recommendations
+        rec_breakdown = {}
+        if recs is not None and len(recs) > 0:
+            latest = recs.iloc[0]
+            rec_breakdown = {
+                "strong_buy": int(latest.get("strongBuy", 0)),
+                "buy": int(latest.get("buy", 0)),
+                "hold": int(latest.get("hold", 0)),
+                "sell": int(latest.get("sell", 0)),
+                "strong_sell": int(latest.get("strongSell", 0)),
+            }
+
+        # Real news headlines
+        headlines = []
+        news = t.news or []
+        for n in news[:8]:
+            content = n.get("content", {})
+            if isinstance(content, dict):
+                title = content.get("title", "")
+                if title:
+                    headlines.append(title)
+
+        log("SENTIMENT", f"Got {len(headlines)} headlines, {analyst_count} analyst opinions")
+
+        # Use GPT-4o-mini to score sentiment from real headlines
+        sentiment_score = "neutral"
+        sentiment_confidence = 0.5
+        bull_signals = []
+        bear_signals = []
+
+        if _llm and headlines:
+            analysis = ask_llm("SENTIMENT",
+                "You are a financial sentiment analyst. Given real news headlines about a stock, "
+                "return ONLY valid JSON with: overall_sentiment (bullish/neutral/bearish), "
+                "confidence (float 0-1), bull_signals (list of 2-3 strings), bear_signals (list of 1-2 strings). "
+                "Base your analysis strictly on the headlines provided.",
+                f"Analyze sentiment for {TICKER} based on these recent headlines:\n" +
+                "\n".join(f"- {h}" for h in headlines),
             )
-            answer = answer.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            analysis = analysis.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             try:
-                result = json.loads(answer)
+                parsed = json.loads(analysis)
+                sentiment_score = parsed.get("overall_sentiment", "neutral")
+                sentiment_confidence = parsed.get("confidence", 0.5)
+                bull_signals = parsed.get("bull_signals", [])
+                bear_signals = parsed.get("bear_signals", [])
             except json.JSONDecodeError:
-                result = _sentiment_fallback()
-        else:
-            log("SENTIMENT", "Analyzing sentiment with built-in logic...")
-            time.sleep(0.6)
-            result = _sentiment_fallback()
+                pass
+        elif headlines:
+            sentiment_score = "neutral"
+            sentiment_confidence = 0.5
+            bull_signals = [headlines[0]] if headlines else []
+            bear_signals = [headlines[-1]] if len(headlines) > 1 else []
 
-        log("SENTIMENT", f"{GREEN}✓{RESET} Sentiment ready — {result.get('overall_sentiment', 'unknown')}")
+        result = {
+            "overall_sentiment": sentiment_score,
+            "confidence": sentiment_confidence,
+            "analyst_consensus": rec_key,
+            "analyst_count": analyst_count,
+            "price_target_mean": analyst_target,
+            "price_target_high": analyst_high,
+            "price_target_low": analyst_low,
+            "recommendation_breakdown": rec_breakdown,
+            "recent_headlines": headlines[:5],
+            "bull_signals": bull_signals,
+            "bear_signals": bear_signals,
+        }
+
+        log("SENTIMENT", f"{GREEN}✓{RESET} Sentiment: {BOLD}{sentiment_score.upper()}{RESET} | "
+            f"Analyst consensus: {rec_key} | Target: ${analyst_target}")
         agent.set_response(msg.message_id, json.dumps(result))
     return handler
 
 
-def _sentiment_fallback():
-    return {
-        "overall_sentiment": "bullish",
-        "confidence": 0.72,
-        "analyst_consensus": "Overweight",
-        "price_target_avg": 252.40,
-        "bull_signals": [
-            "Services segment growing 14% YoY — becoming a recurring revenue machine",
-            "Apple Intelligence rollout driving upgrade cycle expectations",
-            "Share buyback program continues at $110B+ annually",
-        ],
-        "bear_signals": [
-            "China revenue down 11% amid local competition from Huawei",
-            "Valuation premium at 37.8x PE — priced for perfection",
-        ],
-        "recent_news": [
-            "Apple announces AI partnership with OpenAI for on-device models",
-            "EU Digital Markets Act forcing App Store fee restructuring",
-        ],
-    }
-
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Strategy Advisor — GPT-4o-mini on Real Data
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def strategy_handler(agent):
     def handler(msg, topic, session):
@@ -275,53 +319,33 @@ def strategy_handler(agent):
 
         if _llm:
             answer = ask_llm("STRATEGY",
-                "You are a senior investment strategist. Given research data and sentiment analysis, "
-                "produce an actionable recommendation. "
-                "Return ONLY valid JSON (no markdown) with these keys: "
-                "recommendation (str: BUY/HOLD/SELL), confidence (float 0-1), "
+                "You are a senior investment strategist. You receive REAL financial data "
+                "and sentiment analysis. Produce an actionable recommendation. "
+                "Return ONLY valid JSON with: recommendation (BUY/HOLD/SELL), confidence (float 0-1), "
                 "target_price (float), time_horizon (str), "
-                "rationale (str — 3-4 sentences), "
-                "risks (list of 2 strings), catalysts (list of 2 strings).",
-                f"Based on the following research and sentiment data, provide an investment recommendation:\n\n{task}",
-                max_tokens=500,
+                "rationale (str — 4-5 sentences referencing the actual numbers), "
+                "risks (list of 2-3 strings), catalysts (list of 2-3 strings).",
+                f"Based on this REAL market data and sentiment for {TICKER}:\n\n{task}",
+                max_tokens=600,
             )
             answer = answer.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             try:
                 result = json.loads(answer)
             except json.JSONDecodeError:
-                result = _strategy_fallback()
+                result = {"recommendation": "HOLD", "confidence": 0.5,
+                          "rationale": answer, "risks": [], "catalysts": []}
         else:
-            log("STRATEGY", "Building recommendation with built-in logic...")
-            time.sleep(0.5)
-            result = _strategy_fallback()
+            result = {
+                "recommendation": "HOLD", "confidence": 0.6,
+                "target_price": 260.0, "time_horizon": "6-12 months",
+                "rationale": "Insufficient AI backend for full analysis. Use with OPENAI_API_KEY for real recommendations.",
+                "risks": ["No LLM analysis available"], "catalysts": ["Set OPENAI_API_KEY"],
+            }
 
-        log("STRATEGY", f"{GREEN}✓{RESET} Recommendation: {BOLD}{result.get('recommendation', '?')}{RESET}")
+        rec = result.get("recommendation", "?")
+        log("STRATEGY", f"{GREEN}✓{RESET} Recommendation: {BOLD}{rec}{RESET}")
         agent.set_response(msg.message_id, json.dumps(result))
     return handler
-
-
-def _strategy_fallback():
-    return {
-        "recommendation": "HOLD",
-        "confidence": 0.68,
-        "target_price": 245.00,
-        "time_horizon": "6-12 months",
-        "rationale": (
-            "Apple's fundamentals remain strong with Services growing at 14% and gross margins "
-            "at decade highs. However, the current PE of 37.8x leaves little room for error. "
-            "The Apple Intelligence rollout could drive an upgrade supercycle, but China headwinds "
-            "and regulatory pressure in the EU create near-term uncertainty. "
-            "Wait for a pullback to the $210-215 range for a better entry point."
-        ),
-        "risks": [
-            "China revenue deterioration accelerates if Huawei gains more share",
-            "EU App Store regulation could reduce Services margin by 200-300bps",
-        ],
-        "catalysts": [
-            "iPhone 17 with Apple Intelligence driving record upgrade cycle",
-            "Services revenue crossing $30B/quarter milestone",
-        ],
-    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -329,7 +353,7 @@ def _strategy_fallback():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def call_worker(coordinator, session, tracker, name, label, url, task_desc, cost=0.001):
-    log("COORDINATOR", f"Building InvokeMessage for {label}")
+    log("COORDINATOR", f"Signing + dispatching to {label}...")
     msg = InvokeMessage(
         conversation_id=session.conversation_id,
         sender_id=coordinator.agent_id,
@@ -337,9 +361,7 @@ async def call_worker(coordinator, session, tracker, name, label, url, task_desc
         capability=name, payload={"task": task_desc, "content": task_desc},
         timeout_seconds=30,
     )
-    log("COORDINATOR", f"Signing with Ed25519...")
     msg.signature = sign_message(msg, coordinator.keypair.private_key)
-    log("COORDINATOR", f"POST {CYAN}{url}/webhook/sync{RESET} → {label}")
 
     task = tracker.create_task(description=f"[{name}]", assigned_to=url)
     task.mark_running()
@@ -370,61 +392,61 @@ async def run_pipeline(coordinator, worker_urls):
     session = AgentSession(conversation_id=generate_id())
     tracker = TaskTracker()
 
-    # Suppress Flask noise
     _orig = builtins.print
     builtins.print = lambda *a, **k: (_orig(*a, **k) if "Incoming" not in " ".join(str(x) for x in a) else None)
 
-    # ─── Phase 1: Data + Sentiment in parallel ───────────────────────────
+    divider(f"PHASE 1: DATA + SENTIMENT (parallel)")
 
-    divider("PHASE 1: DATA COLLECTION + SENTIMENT ANALYSIS (parallel)")
-
-    log("COORDINATOR", "Analyzing AAPL — breaking into 2 parallel tasks...")
-    log("COORDINATOR", f"  → DATA COLLECTOR: fetch financials, price, metrics")
-    log("COORDINATOR", f"  → SENTIMENT ANALYST: news, analyst ratings, social signals")
-    log("COORDINATOR", "Dispatching both simultaneously...")
+    log("COORDINATOR", f"Analyzing {BOLD}{TICKER}{RESET} — dispatching 2 agents in parallel...")
 
     p1_start = time.time()
     data_result, sentiment_result = await asyncio.gather(
         call_worker(coordinator, session, tracker, "data-collector", "DATA",
                     worker_urls["data-collector"],
-                    "Fetch current financial data, price history, and key metrics for Apple Inc (AAPL)"),
+                    f"Fetch live financial data and key metrics for {TICKER}"),
         call_worker(coordinator, session, tracker, "sentiment-analyst", "SENTIMENT",
                     worker_urls["sentiment-analyst"],
-                    "Analyze current market sentiment, analyst ratings, news, and social signals for Apple Inc (AAPL)"),
+                    f"Analyze current market sentiment, news, and analyst ratings for {TICKER}"),
     )
     p1_ms = (time.time() - p1_start) * 1000
     log("COORDINATOR", f"Phase 1 complete in {p1_ms:.0f}ms (parallel)")
 
-    # Show results
+    # Display real data
     if data_result["status"] == "success":
-        r = data_result["result"]
-        log("COORDINATOR", "Reading DATA COLLECTOR results:")
-        log("COORDINATOR", f"  Price: ${r.get('current_price', '?')}  |  PE: {r.get('pe_ratio', '?')}  |  MCap: ${r.get('market_cap_billions', '?')}B")
-        log("COORDINATOR", f"  52W Range: ${r.get('price_52w_low', '?')} - ${r.get('price_52w_high', '?')}")
-        for m in r.get("key_metrics", []):
-            log("COORDINATOR", f"  • {m}")
+        d = data_result["result"]
+        log("COORDINATOR", f"  {BOLD}Price:{RESET} ${d.get('current_price')} ({d.get('change_pct', 0):+.2f}%)")
+        log("COORDINATOR", f"  {BOLD}PE:{RESET} {d.get('pe_ratio')}  |  {BOLD}Fwd PE:{RESET} {d.get('forward_pe')}  |  {BOLD}MCap:{RESET} ${d.get('market_cap_billions')}B")
+        log("COORDINATOR", f"  {BOLD}52W:{RESET} ${d.get('price_52w_low')} — ${d.get('price_52w_high')}  |  {BOLD}Rev Growth:{RESET} {d.get('revenue_growth_yoy')}")
+        log("COORDINATOR", f"  {BOLD}Margins:{RESET} Gross {d.get('gross_margin')} | Op {d.get('operating_margin')} | Net {d.get('profit_margin')}")
+        log("COORDINATOR", f"  {BOLD}FCF:{RESET} ${d.get('free_cash_flow_billions')}B  |  {BOLD}ROE:{RESET} {d.get('return_on_equity')}  |  {BOLD}Beta:{RESET} {d.get('beta')}")
 
     if sentiment_result["status"] == "success":
-        r = sentiment_result["result"]
-        log("COORDINATOR", "Reading SENTIMENT ANALYST results:")
-        log("COORDINATOR", f"  Sentiment: {BOLD}{r.get('overall_sentiment', '?').upper()}{RESET}  |  Confidence: {r.get('confidence', '?')}")
-        log("COORDINATOR", f"  Analyst consensus: {r.get('analyst_consensus', '?')}  |  Target: ${r.get('price_target_avg', '?')}")
+        s = sentiment_result["result"]
+        sent = s.get("overall_sentiment", "?").upper()
+        sent_color = GREEN if "bull" in sent.lower() else (RED if "bear" in sent.lower() else YELLOW)
+        log("COORDINATOR", f"  {BOLD}Sentiment:{RESET} {sent_color}{sent}{RESET} (confidence: {s.get('confidence')})")
+        log("COORDINATOR", f"  {BOLD}Analysts:{RESET} {s.get('analyst_consensus')} ({s.get('analyst_count')} analysts)")
+        log("COORDINATOR", f"  {BOLD}Targets:{RESET} ${s.get('price_target_low')} — ${s.get('price_target_mean')} — ${s.get('price_target_high')}")
+        bd = s.get("recommendation_breakdown", {})
+        if bd:
+            log("COORDINATOR", f"  {BOLD}Breakdown:{RESET} {GREEN}Strong Buy:{bd.get('strong_buy',0)} Buy:{bd.get('buy',0)}{RESET} "
+                f"Hold:{bd.get('hold',0)} {RED}Sell:{bd.get('sell',0)} Strong Sell:{bd.get('strong_sell',0)}{RESET}")
+        for h in s.get("recent_headlines", [])[:3]:
+            log("COORDINATOR", f"  {DIM}📰 {h[:80]}{RESET}")
 
-    # ─── Phase 2: Strategy recommendation ─────────────────────────────────
+    divider(f"PHASE 2: STRATEGY (sequential, uses real data)")
 
-    divider("PHASE 2: INVESTMENT STRATEGY (sequential, uses Phase 1)")
-
-    log("COORDINATOR", "Synthesizing data + sentiment into briefing for strategist...")
+    log("COORDINATOR", "Synthesizing real data into briefing for strategist...")
 
     data_d = data_result.get("result", {}) if data_result["status"] == "success" else {}
     sent_d = sentiment_result.get("result", {}) if sentiment_result["status"] == "success" else {}
 
     parts = []
     if data_d:
-        parts.append(f"[Financial Data]\n{_format_result_for_briefing(data_d)}")
+        parts.append(f"[Financial Data — Live from Yahoo Finance]\n{_format_result_for_briefing(data_d)}")
     if sent_d:
-        parts.append(f"[Sentiment Analysis]\n{_format_result_for_briefing(sent_d)}")
-    briefing = "\n\n".join(parts) or "No data."
+        parts.append(f"[Sentiment & Analyst Data — Live]\n{_format_result_for_briefing(sent_d)}")
+    briefing = "\n\n".join(parts)
 
     log("COORDINATOR", f"Briefing ready ({len(briefing)} chars) — sending to STRATEGY ADVISOR")
 
@@ -432,21 +454,18 @@ async def run_pipeline(coordinator, worker_urls):
     strategy_result = await call_worker(
         coordinator, session, tracker, "strategy-advisor", "STRATEGY",
         worker_urls["strategy-advisor"],
-        f"Based on the following financial data and sentiment analysis for Apple Inc (AAPL), "
-        f"provide an investment recommendation:\n\n{briefing}",
+        f"Provide an investment recommendation for {TICKER} based on this REAL data:\n\n{briefing}",
         cost=0.002,
     )
     p2_ms = (time.time() - p2_start) * 1000
 
     builtins.print = _orig
 
-    total_ms = p1_ms + p2_ms
-
     return {
         "data": data_result,
         "sentiment": sentiment_result,
         "strategy": strategy_result,
-        "p1_ms": p1_ms, "p2_ms": p2_ms, "total_ms": total_ms,
+        "p1_ms": p1_ms, "p2_ms": p2_ms, "total_ms": p1_ms + p2_ms,
         "task_summary": tracker.summary(),
     }
 
@@ -461,44 +480,39 @@ def main():
 
     _real_print()
     _real_print(f"  {BOLD}{'═' * 64}{RESET}")
-    _real_print(f"  {BOLD}  AAPL Market Research — ZyndAI Multi-Agent Pipeline{RESET}")
+    _real_print(f"  {BOLD}  {TICKER} Market Research — ZyndAI Multi-Agent Pipeline{RESET}")
     _real_print(f"  {BOLD}{'═' * 64}{RESET}")
     _real_print()
 
-    log("SYSTEM", f"Target: {BOLD}Apple Inc (AAPL){RESET}")
+    log("SYSTEM", f"Target: {BOLD}{TICKER}{RESET}")
     log("SYSTEM", f"AI Backend: {AI_MODE}")
+    log("SYSTEM", f"Data Source: Yahoo Finance (live)")
     log("SYSTEM", f"Registry: {REGISTRY_URL}")
-    log("SYSTEM", f"Agents: 4 (coordinator + data collector + sentiment analyst + strategy advisor)")
 
-    tmpdir = tempfile.mkdtemp(prefix="zyndai_aapl_")
+    tmpdir = tempfile.mkdtemp(prefix="zyndai_stock_")
 
     divider("BOOTING AGENTS")
 
     agents = {}
-
-    agents["aapl-coordinator"] = boot_agent(tmpdir, "aapl-coordinator",
-        "Orchestrates market research pipeline for stock analysis",
+    agents["stock-coordinator"] = boot_agent(tmpdir, "stock-coordinator",
+        "Orchestrates stock market research pipeline",
         ["orchestration", "market-research"], "orchestration", 7300)
-
     agents["data-collector"] = boot_agent(tmpdir, "data-collector",
-        "Collects financial data, price history, and key metrics for stocks",
-        ["financial-data", "stock-metrics", "fundamentals"], "finance", 7301)
-
+        "Fetches live financial data from Yahoo Finance",
+        ["financial-data", "stock-metrics", "yahoo-finance"], "finance", 7301)
     agents["sentiment-analyst"] = boot_agent(tmpdir, "sentiment-analyst",
-        "Analyzes market sentiment from news, social media, and analyst ratings",
-        ["sentiment-analysis", "market-sentiment", "news"], "analysis", 7302)
-
+        "Analyzes market sentiment from real news and analyst ratings",
+        ["sentiment-analysis", "news-analysis", "analyst-ratings"], "analysis", 7302)
     agents["strategy-advisor"] = boot_agent(tmpdir, "strategy-advisor",
-        "Produces investment recommendations based on data and sentiment",
-        ["investment-strategy", "buy-sell", "portfolio"], "advisory", 7303)
+        "Produces investment recommendations from real market data",
+        ["investment-strategy", "stock-recommendation"], "advisory", 7303)
 
     agents["data-collector"].register_handler(data_handler(agents["data-collector"]))
     agents["sentiment-analyst"].register_handler(sentiment_handler(agents["sentiment-analyst"]))
     agents["strategy-advisor"].register_handler(strategy_handler(agents["strategy-advisor"]))
 
-    worker_urls = {n: base_url(a) for n, a in agents.items() if n != "aapl-coordinator"}
+    worker_urls = {n: base_url(a) for n, a in agents.items() if n != "stock-coordinator"}
 
-    # Health check
     for name, agent in agents.items():
         url = base_url(agent)
         for _ in range(30):
@@ -511,25 +525,18 @@ def main():
 
     divider("DISCOVERING AGENTS VIA REGISTRY")
 
-    log("COORDINATOR", f"Searching {CYAN}{REGISTRY_URL}{RESET} for specialist agents...")
-
-    coordinator = agents["aapl-coordinator"]
-    for wname, keyword in [("data-collector", "financial-data"), ("sentiment-analyst", "sentiment"), ("strategy-advisor", "investment-strategy")]:
+    log("COORDINATOR", f"Searching {CYAN}{REGISTRY_URL}{RESET}...")
+    coordinator = agents["stock-coordinator"]
+    for wname, keyword in [("data-collector", "yahoo-finance"), ("sentiment-analyst", "sentiment-analysis"), ("strategy-advisor", "investment-strategy")]:
         try:
             found = coordinator.search_agents(keyword=keyword, limit=5)
             match = next((a for a in found if a.get("name") == wname), None)
             if match:
-                full = dns_registry.get_agent(REGISTRY_URL, match["agent_id"])
-                url = (full or {}).get("agent_url", "") or base_url(agents[wname])
-                worker_urls[wname] = url
                 score = match.get("score", 0)
                 log("COORDINATOR", f'{GREEN}✓{RESET} search("{keyword}") → {BOLD}{match["name"]}{RESET}  score={score:.2f}')
-            else:
-                log("COORDINATOR", f'{YELLOW}⏱{RESET} search("{keyword}") → resolving locally')
         except Exception:
-            log("COORDINATOR", f'{YELLOW}⏱{RESET} search("{keyword}") → fallback')
+            pass
 
-    # Run pipeline
     results = asyncio.run(run_pipeline(coordinator, worker_urls))
 
     # ─── Final Output ─────────────────────────────────────────────────────
@@ -541,7 +548,9 @@ def main():
         rec = s.get("recommendation", "?")
         rec_color = GREEN if rec == "BUY" else (YELLOW if rec == "HOLD" else RED)
 
-        _real_print(f"    {BOLD}Ticker:{RESET}          AAPL")
+        _real_print(f"    {BOLD}Ticker:{RESET}          {TICKER}")
+        price = results["data"]["result"].get("current_price", "?") if results["data"]["status"] == "success" else "?"
+        _real_print(f"    {BOLD}Current Price:{RESET}   ${price}")
         _real_print(f"    {BOLD}Recommendation:{RESET}  {rec_color}{BOLD}{rec}{RESET}")
         _real_print(f"    {BOLD}Confidence:{RESET}      {s.get('confidence', '?')}")
         _real_print(f"    {BOLD}Target Price:{RESET}    ${s.get('target_price', '?')}")
@@ -551,31 +560,26 @@ def main():
         for line in textwrap.wrap(s.get("rationale", ""), 60):
             _real_print(f"      {line}")
         _real_print()
-        _real_print(f"    {BOLD}Catalysts:{RESET}")
-        for c in s.get("catalysts", []):
-            _real_print(f"      {GREEN}▲{RESET} {c}")
-        _real_print()
-        _real_print(f"    {BOLD}Risks:{RESET}")
-        for r in s.get("risks", []):
-            _real_print(f"      {RED}▼{RESET} {r}")
+        if s.get("catalysts"):
+            _real_print(f"    {BOLD}Catalysts:{RESET}")
+            for c in s["catalysts"]:
+                _real_print(f"      {GREEN}▲{RESET} {c}")
+            _real_print()
+        if s.get("risks"):
+            _real_print(f"    {BOLD}Risks:{RESET}")
+            for r in s["risks"]:
+                _real_print(f"      {RED}▼{RESET} {r}")
     else:
-        _real_print(f"    {RED}Strategy agent failed: {results['strategy'].get('error')}{RESET}")
+        _real_print(f"    {RED}Strategy failed: {results['strategy'].get('error')}{RESET}")
 
     divider("PIPELINE METRICS")
 
     ts = results["task_summary"]
     log("SYSTEM", f"Tasks: {ts['total']} completed, {ts['by_status'].get('failed', 0)} failed")
     log("SYSTEM", f"Cost: ${ts['total_cost_usd']:.4f} USDC")
-    log("SYSTEM", f"Phase 1 (data + sentiment, parallel): {results['p1_ms']:.0f}ms")
-    log("SYSTEM", f"Phase 2 (strategy, sequential): {results['p2_ms']:.0f}ms")
-    log("SYSTEM", f"Total pipeline: {results['total_ms']:.0f}ms")
-
-    d_ms = results["data"].get("duration_ms", 0) or 0
-    s_ms = results["sentiment"].get("duration_ms", 0) or 0
-    st_ms = results["strategy"].get("duration_ms", 0) or 0
-    seq = d_ms + s_ms + st_ms
-    if seq > 0 and results["total_ms"] > 0:
-        log("SYSTEM", f"Parallelism: {seq / results['total_ms']:.1f}x faster than sequential")
+    log("SYSTEM", f"Phase 1 (parallel): {results['p1_ms']:.0f}ms")
+    log("SYSTEM", f"Phase 2 (sequential): {results['p2_ms']:.0f}ms")
+    log("SYSTEM", f"Total: {results['total_ms']:.0f}ms")
 
     _real_print()
     for a in agents.values():
@@ -584,6 +588,8 @@ def main():
     _real_print(f"  {BOLD}{'═' * 64}{RESET}")
     _real_print(f"  {BOLD}  Analysis Complete{RESET}")
     _real_print(f"  {BOLD}{'═' * 64}{RESET}")
+    _real_print()
+    _real_print(f"  {DIM}Try another ticker: TICKER=TSLA uv run python examples/apple_stock_research.py{RESET}")
     _real_print()
 
 
