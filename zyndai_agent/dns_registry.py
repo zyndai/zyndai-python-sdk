@@ -28,32 +28,38 @@ def register_agent(
     developer_proof: Optional[dict] = None,
     agent_name: Optional[str] = None,
     version: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    service_endpoint: Optional[str] = None,
+    openapi_url: Optional[str] = None,
+    pricing_model: Optional[dict] = None,
 ) -> str:
     """
-    Register an agent on the agent-dns mesh.
+    Register an agent or service on the registry.
 
-    Builds signable payload matching server.go:422-429, signs with agent's
-    Ed25519 key, and POSTs to /v1/agents.
+    Builds signable payload, signs with Ed25519 key, and POSTs to /v1/agents
+    (or /v1/services for type=service).
 
     Returns:
-        agent_id: The registered agent's ID
+        entity_id: The registered agent/service ID
     """
     # Build signable payload (sorted keys to match Go's json.Marshal)
     signable = {
-        "agent_url": agent_url,
+        "agent_url": agent_url or "",
         "category": category,
         "name": name,
         "public_key": keypair.public_key_string,
         "summary": summary or "",
         "tags": tags or [],
     }
+    if entity_type:
+        signable["type"] = entity_type
     signable_bytes = json.dumps(signable, sort_keys=True, separators=(",", ":")).encode()
     signature = sign(keypair.private_key, signable_bytes)
 
     # Build full registration request
     body = {
         "name": name,
-        "agent_url": agent_url,
+        "agent_url": agent_url or "",
         "category": category,
         "tags": tags or [],
         "summary": summary or "",
@@ -61,6 +67,14 @@ def register_agent(
         "signature": signature,
     }
 
+    if entity_type:
+        body["type"] = entity_type
+    if service_endpoint:
+        body["service_endpoint"] = service_endpoint
+    if openapi_url:
+        body["openapi_url"] = openapi_url
+    if pricing_model:
+        body["pricing_model"] = pricing_model
     if capability_summary:
         body["capability_summary"] = capability_summary
     if developer_id:
@@ -72,15 +86,17 @@ def register_agent(
     if version:
         body["version"] = version
 
+    # Use /v1/services endpoint for services, /v1/agents for agents
+    endpoint = "/v1/services" if entity_type == "service" else "/v1/agents"
     resp = requests.post(
-        f"{registry_url}/v1/agents",
+        f"{registry_url}{endpoint}",
         json=body,
         headers={"Content-Type": "application/json"},
     )
 
     if resp.status_code not in (200, 201):
         raise RuntimeError(
-            f"Failed to register agent on agent-dns. "
+            f"Failed to register on registry. "
             f"Status: {resp.status_code}, Response: {resp.text}"
         )
 
@@ -237,6 +253,7 @@ def search_agents(
     developer_id: Optional[str] = None,
     developer_handle: Optional[str] = None,
     fqan: Optional[str] = None,
+    entity_type: Optional[str] = None,
     max_results: int = 10,
     offset: int = 0,
     federated: bool = False,
@@ -292,6 +309,8 @@ def search_agents(
         body["developer_handle"] = developer_handle
     if fqan:
         body["fqan"] = fqan
+    if entity_type:
+        body["type"] = entity_type
     if offset:
         body["offset"] = offset
     if timeout_ms is not None:

@@ -20,6 +20,7 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
     p.add_argument("--developer", dest="developer_id", help="Filter by developer ID")
     p.add_argument("--developer-handle", dest="developer_handle", help="Filter by developer handle (e.g., acme-corp)")
     p.add_argument("--fqan", help="Look up agent by exact FQAN (e.g., dns01.zynd.ai/acme-corp/my-agent)")
+    p.add_argument("--type", dest="entity_type", choices=["agent", "service", "any"], default="any", help="Filter by type (default: any)")
     p.add_argument("--min-trust", type=float, dest="min_trust_score", help="Minimum trust score (0.0-1.0)")
     p.add_argument("--max-results", type=int, default=10, help="Max results (default: 10)")
     p.add_argument("--offset", type=int, default=0, help="Pagination offset")
@@ -46,6 +47,7 @@ def run(args: argparse.Namespace):
         developer_id=getattr(args, "developer_id", None),
         developer_handle=getattr(args, "developer_handle", None),
         fqan=getattr(args, "fqan", None),
+        entity_type=getattr(args, "entity_type", None) if getattr(args, "entity_type", "any") != "any" else None,
         max_results=args.max_results,
         offset=getattr(args, "offset", 0),
         federated=args.federated,
@@ -76,8 +78,10 @@ def run(args: argparse.Namespace):
         dev_id = agent.get("developer_id", "")
         tags = agent.get("tags", [])
 
+        entity_type = agent.get("type", "agent")
+        type_label = "[SERVICE]" if entity_type == "service" else "[AGENT]"
         status_label = f"  [{status}]" if status else ""
-        print(f"  {name}{status_label}")
+        print(f"  {type_label} {name}{status_label}")
         print(f"    ID:       {agent_id}")
         print(f"    Category: {category}")
         if tags:
