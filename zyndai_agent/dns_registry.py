@@ -235,6 +235,8 @@ def search_agents(
     min_trust_score: Optional[float] = None,
     status: Optional[str] = None,
     developer_id: Optional[str] = None,
+    developer_handle: Optional[str] = None,
+    fqan: Optional[str] = None,
     max_results: int = 10,
     offset: int = 0,
     federated: bool = False,
@@ -286,6 +288,10 @@ def search_agents(
         body["status"] = status
     if developer_id:
         body["developer_id"] = developer_id
+    if developer_handle:
+        body["developer_handle"] = developer_handle
+    if fqan:
+        body["fqan"] = fqan
     if offset:
         body["offset"] = offset
     if timeout_ms is not None:

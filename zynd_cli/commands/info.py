@@ -4,7 +4,8 @@ import argparse
 import json
 import sys
 
-from zyndai_agent.ed25519_identity import load_keypair, load_keypair_with_metadata
+import requests as _req
+from zyndai_agent.ed25519_identity import load_keypair, load_keypair_with_metadata, generate_developer_id
 from zynd_cli.config import developer_key_path, agents_dir, get_registry_url
 
 
@@ -30,12 +31,21 @@ def run(args: argparse.Namespace):
     dev_info = None
     if dev_path.exists():
         dev_kp = load_keypair(str(dev_path))
-        dev_id = "agdns:dev:" + dev_kp.agent_id.replace("agdns:", "")
+        dev_id = generate_developer_id(dev_kp.public_key_bytes)
         dev_info = {
             "developer_id": dev_id,
             "public_key": dev_kp.public_key_string,
             "keypair_path": str(dev_path),
+            "handle": "",
         }
+        # Fetch developer handle from registry
+        try:
+            resp = _req.get(f"{registry_url}/v1/developers/{dev_id}", timeout=5)
+            if resp.status_code == 200:
+                remote_dev = resp.json()
+                dev_info["handle"] = remote_dev.get("dev_handle", "")
+        except Exception:
+            pass
 
     # Agent info
     agent_infos = []
@@ -54,16 +64,28 @@ def run(args: argparse.Namespace):
                     "public_key": kp.public_key_string,
                     "keypair_path": str(kp_file),
                     "derivation_index": derived.get("index"),
+                    "fqan": "",
                 })
             except Exception:
                 continue
 
+    # Fetch FQANs for agents from registry
+    for a_info in agent_infos:
+        try:
+            resp = _req.get(f"{registry_url}/v1/agents/{a_info['agent_id']}", timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                a_info["fqan"] = data.get("fqan", "")
+        except Exception:
+            pass
+
     if args.output_json:
-        print(json.dumps({
+        out = {
             "registry_url": registry_url,
             "developer": dev_info,
             "agents": agent_infos,
-        }, indent=2))
+        }
+        print(json.dumps(out, indent=2))
         return
 
     if use_rich:
@@ -75,6 +97,8 @@ def run(args: argparse.Namespace):
         if dev_info:
             console.print(f"  [bold]Developer[/bold]")
             console.print(f"    [dim]ID:[/dim]         {dev_info['developer_id']}")
+            if dev_info.get("handle"):
+                console.print(f"    [dim]Handle:[/dim]     [bold #06B6D4]@{dev_info['handle']}[/bold #06B6D4]")
             console.print(f"    [dim]Public Key:[/dim] {dev_info['public_key']}")
             console.print(f"    [dim]Keypair:[/dim]    {dev_info['keypair_path']}")
         else:
@@ -87,8 +111,10 @@ def run(args: argparse.Namespace):
                 idx = a.get("derivation_index")
                 idx_label = f" [dim](index {idx})[/dim]" if idx is not None else ""
                 console.print(f"    [bold #06B6D4]{a['name']}[/bold #06B6D4]{idx_label}")
-                console.print(f"      [dim]ID:[/dim]  {a['agent_id']}")
-                console.print(f"      [dim]Key:[/dim] {a['public_key']}")
+                console.print(f"      [dim]ID:[/dim]   {a['agent_id']}")
+                if a.get("fqan"):
+                    console.print(f"      [dim]FQAN:[/dim] [bold #8B5CF6]{a['fqan']}[/bold #8B5CF6]")
+                console.print(f"      [dim]Key:[/dim]  {a['public_key']}")
         else:
             console.print(f"  [dim]No agents found.[/dim] Run 'zynd agent init' to create one.")
         console.print()
@@ -99,6 +125,8 @@ def run(args: argparse.Namespace):
         if dev_info:
             print(f"  Developer")
             print(f"    ID:         {dev_info['developer_id']}")
+            if dev_info.get("handle"):
+                print(f"    Handle:     @{dev_info['handle']}")
             print(f"    Public Key: {dev_info['public_key']}")
             print(f"    Keypair:    {dev_info['keypair_path']}")
         else:
@@ -111,8 +139,10 @@ def run(args: argparse.Namespace):
                 idx = a.get("derivation_index")
                 idx_label = f" (index {idx})" if idx is not None else ""
                 print(f"    {a['name']}{idx_label}")
-                print(f"      ID:  {a['agent_id']}")
-                print(f"      Key: {a['public_key']}")
+                print(f"      ID:   {a['agent_id']}")
+                if a.get("fqan"):
+                    print(f"      FQAN: {a['fqan']}")
+                print(f"      Key:  {a['public_key']}")
         else:
             print(f"  No agents found. Run 'zynd agent init' to create one.")
         print()

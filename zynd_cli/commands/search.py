@@ -18,6 +18,8 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
     p.add_argument("--models", nargs="*", help="Filter by AI models (e.g., gpt-4)")
     p.add_argument("--status", choices=["active", "inactive", "any"], help="Filter by status")
     p.add_argument("--developer", dest="developer_id", help="Filter by developer ID")
+    p.add_argument("--developer-handle", dest="developer_handle", help="Filter by developer handle (e.g., acme-corp)")
+    p.add_argument("--fqan", help="Look up agent by exact FQAN (e.g., dns01.zynd.ai/acme-corp/my-agent)")
     p.add_argument("--min-trust", type=float, dest="min_trust_score", help="Minimum trust score (0.0-1.0)")
     p.add_argument("--max-results", type=int, default=10, help="Max results (default: 10)")
     p.add_argument("--offset", type=int, default=0, help="Pagination offset")
@@ -42,6 +44,8 @@ def run(args: argparse.Namespace):
         min_trust_score=getattr(args, "min_trust_score", None),
         status=getattr(args, "status", None),
         developer_id=getattr(args, "developer_id", None),
+        developer_handle=getattr(args, "developer_handle", None),
+        fqan=getattr(args, "fqan", None),
         max_results=args.max_results,
         offset=getattr(args, "offset", 0),
         federated=args.federated,
@@ -80,7 +84,13 @@ def run(args: argparse.Namespace):
             print(f"    Tags:     {', '.join(tags)}")
         if summary:
             print(f"    Summary:  {summary}")
-        if dev_id:
+        fqan = agent.get("fqan", "")
+        dev_handle = agent.get("developer_handle", "")
+        if fqan:
+            print(f"    FQAN:      {fqan}")
+        if dev_handle:
+            print(f"    Handle:    @{dev_handle}")
+        elif dev_id:
             print(f"    Developer: {dev_id}")
         if score:
             print(f"    Score:    {score:.4f}")
