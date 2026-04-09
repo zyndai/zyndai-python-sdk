@@ -232,7 +232,7 @@ def _service_register(args: argparse.Namespace):
     # Create derivation proof
     derived = meta.get("derived_from", {})
     agent_index = derived.get("index", config.get("agent_index", 0))
-    proof = create_derivation_proof(dev_kp, kp.public_key_string, agent_index)
+    proof = create_derivation_proof(dev_kp, kp.public_key, agent_index)
 
     service_name_zns = config.get("service_name", "")
 
