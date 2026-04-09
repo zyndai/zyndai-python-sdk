@@ -72,7 +72,7 @@ def run(args: argparse.Namespace):
     # Fetch FQANs for agents from registry
     for a_info in agent_infos:
         try:
-            resp = _req.get(f"{registry_url}/v1/agents/{a_info['agent_id']}", timeout=5)
+            resp = _req.get(f"{registry_url}/v1/entities/{a_info['agent_id']}", timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
                 a_info["fqan"] = data.get("fqan", "")

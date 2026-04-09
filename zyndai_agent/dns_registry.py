@@ -343,7 +343,7 @@ def get_agent_card(registry_url: str, agent_id: str) -> Optional[dict]:
     GET /v1/agents/{agent_id}/card
     """
     try:
-        resp = requests.get(f"{registry_url}/v1/agents/{agent_id}/card")
+        resp = requests.get(f"{registry_url}/v1/entities/{agent_id}/card")
         if resp.status_code == 200:
             return resp.json()
         logger.error(f"Failed to get agent card for {agent_id}: {resp.status_code}")
