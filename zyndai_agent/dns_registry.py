@@ -86,8 +86,8 @@ def register_agent(
     if version:
         body["version"] = version
 
-    # Use /v1/services endpoint for services, /v1/agents for agents
-    endpoint = "/v1/services" if entity_type == "service" else "/v1/agents"
+    # Use unified /v1/entities endpoint
+    endpoint = "/v1/entities"
     resp = requests.post(
         f"{registry_url}{endpoint}",
         json=body,
@@ -159,7 +159,7 @@ def get_agent(registry_url: str, agent_id: str) -> Optional[dict]:
     GET /v1/agents/{agent_id}
     """
     try:
-        resp = requests.get(f"{registry_url}/v1/agents/{agent_id}")
+        resp = requests.get(f"{registry_url}/v1/entities/{agent_id}")
         if resp.status_code == 200:
             return resp.json()
         logger.error(f"Failed to get agent {agent_id}: {resp.status_code}")
@@ -198,7 +198,7 @@ def update_agent(
 
     try:
         resp = requests.put(
-            f"{registry_url}/v1/agents/{agent_id}",
+            f"{registry_url}/v1/entities/{agent_id}",
             data=body_bytes,
             headers=headers,
         )
@@ -227,7 +227,7 @@ def delete_agent(
 
     try:
         resp = requests.delete(
-            f"{registry_url}/v1/agents/{agent_id}",
+            f"{registry_url}/v1/entities/{agent_id}",
             headers=headers,
         )
         if resp.status_code in (200, 204):
