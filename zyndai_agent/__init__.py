@@ -1,4 +1,6 @@
+from zyndai_agent.base import ZyndBase, ZyndBaseConfig
 from zyndai_agent.agent import ZyndAIAgent, AgentConfig
+from zyndai_agent.service import ZyndService, ServiceConfig
 from zyndai_agent.communication import AgentCommunicationManager, MQTTMessage
 from zyndai_agent.webhook_communication import WebhookCommunicationManager
 from zyndai_agent.message import AgentMessage
@@ -44,8 +46,12 @@ except ImportError:
     PaymentRouter = None
 
 __all__ = [
+    "ZyndBase",
+    "ZyndBaseConfig",
     "ZyndAIAgent",
     "AgentConfig",
+    "ZyndService",
+    "ServiceConfig",
     "AgentCommunicationManager",
     "WebhookCommunicationManager",
     "MQTTMessage",

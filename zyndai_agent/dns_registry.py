@@ -28,32 +28,38 @@ def register_agent(
     developer_proof: Optional[dict] = None,
     agent_name: Optional[str] = None,
     version: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    service_endpoint: Optional[str] = None,
+    openapi_url: Optional[str] = None,
+    pricing_model: Optional[dict] = None,
 ) -> str:
     """
-    Register an agent on the agent-dns mesh.
+    Register an agent or service on the registry.
 
-    Builds signable payload matching server.go:422-429, signs with agent's
-    Ed25519 key, and POSTs to /v1/agents.
+    Builds signable payload, signs with Ed25519 key, and POSTs to /v1/agents
+    (or /v1/services for type=service).
 
     Returns:
-        agent_id: The registered agent's ID
+        entity_id: The registered agent/service ID
     """
     # Build signable payload (sorted keys to match Go's json.Marshal)
     signable = {
-        "agent_url": agent_url,
+        "agent_url": agent_url or "",
         "category": category,
         "name": name,
         "public_key": keypair.public_key_string,
         "summary": summary or "",
         "tags": tags or [],
     }
+    if entity_type:
+        signable["type"] = entity_type
     signable_bytes = json.dumps(signable, sort_keys=True, separators=(",", ":")).encode()
     signature = sign(keypair.private_key, signable_bytes)
 
     # Build full registration request
     body = {
         "name": name,
-        "agent_url": agent_url,
+        "agent_url": agent_url or "",
         "category": category,
         "tags": tags or [],
         "summary": summary or "",
@@ -61,6 +67,14 @@ def register_agent(
         "signature": signature,
     }
 
+    if entity_type:
+        body["type"] = entity_type
+    if service_endpoint:
+        body["service_endpoint"] = service_endpoint
+    if openapi_url:
+        body["openapi_url"] = openapi_url
+    if pricing_model:
+        body["pricing_model"] = pricing_model
     if capability_summary:
         body["capability_summary"] = capability_summary
     if developer_id:
@@ -72,15 +86,17 @@ def register_agent(
     if version:
         body["version"] = version
 
+    # Use unified /v1/entities endpoint
+    endpoint = "/v1/entities"
     resp = requests.post(
-        f"{registry_url}/v1/agents",
+        f"{registry_url}{endpoint}",
         json=body,
         headers={"Content-Type": "application/json"},
     )
 
     if resp.status_code not in (200, 201):
         raise RuntimeError(
-            f"Failed to register agent on agent-dns. "
+            f"Failed to register on registry. "
             f"Status: {resp.status_code}, Response: {resp.text}"
         )
 
@@ -143,7 +159,7 @@ def get_agent(registry_url: str, agent_id: str) -> Optional[dict]:
     GET /v1/agents/{agent_id}
     """
     try:
-        resp = requests.get(f"{registry_url}/v1/agents/{agent_id}")
+        resp = requests.get(f"{registry_url}/v1/entities/{agent_id}")
         if resp.status_code == 200:
             return resp.json()
         logger.error(f"Failed to get agent {agent_id}: {resp.status_code}")
@@ -182,7 +198,7 @@ def update_agent(
 
     try:
         resp = requests.put(
-            f"{registry_url}/v1/agents/{agent_id}",
+            f"{registry_url}/v1/entities/{agent_id}",
             data=body_bytes,
             headers=headers,
         )
@@ -211,7 +227,7 @@ def delete_agent(
 
     try:
         resp = requests.delete(
-            f"{registry_url}/v1/agents/{agent_id}",
+            f"{registry_url}/v1/entities/{agent_id}",
             headers=headers,
         )
         if resp.status_code in (200, 204):
@@ -235,6 +251,9 @@ def search_agents(
     min_trust_score: Optional[float] = None,
     status: Optional[str] = None,
     developer_id: Optional[str] = None,
+    developer_handle: Optional[str] = None,
+    fqan: Optional[str] = None,
+    entity_type: Optional[str] = None,
     max_results: int = 10,
     offset: int = 0,
     federated: bool = False,
@@ -286,6 +305,12 @@ def search_agents(
         body["status"] = status
     if developer_id:
         body["developer_id"] = developer_id
+    if developer_handle:
+        body["developer_handle"] = developer_handle
+    if fqan:
+        body["fqan"] = fqan
+    if entity_type:
+        body["type"] = entity_type
     if offset:
         body["offset"] = offset
     if timeout_ms is not None:
@@ -318,7 +343,7 @@ def get_agent_card(registry_url: str, agent_id: str) -> Optional[dict]:
     GET /v1/agents/{agent_id}/card
     """
     try:
-        resp = requests.get(f"{registry_url}/v1/agents/{agent_id}/card")
+        resp = requests.get(f"{registry_url}/v1/entities/{agent_id}/card")
         if resp.status_code == 200:
             return resp.json()
         logger.error(f"Failed to get agent card for {agent_id}: {resp.status_code}")

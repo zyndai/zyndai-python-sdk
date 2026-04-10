@@ -128,19 +128,28 @@ def save_keypair(kp: Ed25519Keypair, path: str, derivation_metadata: Optional[di
 def generate_agent_id(public_key_bytes: bytes) -> str:
     """
     Generate agent ID from public key bytes.
-    Matches registry_record.go:84-87: "agdns:" + sha256(pub)[:16].hex()
+    Format: zns:<sha256(pub)[:16].hex()>
     """
     digest = hashlib.sha256(public_key_bytes).digest()
-    return "agdns:" + digest[:16].hex()
+    return "zns:" + digest[:16].hex()
+
+
+def generate_service_id(public_key_bytes: bytes) -> str:
+    """
+    Generate service ID from public key bytes.
+    Format: zns:svc:<sha256(pub)[:16].hex()>
+    """
+    digest = hashlib.sha256(public_key_bytes).digest()
+    return "zns:svc:" + digest[:16].hex()
 
 
 def generate_developer_id(public_key_bytes: bytes) -> str:
     """
     Generate developer ID from public key bytes.
-    Matches developer.go:84-86: "agdns:dev:" + sha256(pub)[:16].hex()
+    Format: zns:dev:<sha256(pub)[:16].hex()>
     """
     digest = hashlib.sha256(public_key_bytes).digest()
-    return "agdns:dev:" + digest[:16].hex()
+    return "zns:dev:" + digest[:16].hex()
 
 
 def sign(private_key: Ed25519PrivateKey, message: bytes) -> str:
@@ -190,7 +199,7 @@ def derive_agent_keypair(dev_private_key: Ed25519PrivateKey, index: int) -> Ed25
     HD derivation: derive agent keypair from developer key + index.
     Matches identity.go:150-178.
 
-    seed = SHA-512(dev_private_key_bytes || "agdns:agent:" || uint32_be(index))[:32]
+    seed = SHA-512(dev_private_key_bytes || "zns:agent:" || uint32_be(index))[:32]
     """
     dev_priv_bytes = dev_private_key.private_bytes(
         encoding=serialization.Encoding.Raw,
@@ -198,8 +207,8 @@ def derive_agent_keypair(dev_private_key: Ed25519PrivateKey, index: int) -> Ed25
         encryption_algorithm=serialization.NoEncryption(),
     )
 
-    # Build derivation input: seed || "agdns:agent:" || uint32_be(index)
-    derivation_input = dev_priv_bytes + b"agdns:agent:" + struct.pack(">I", index)
+    # Build derivation input: seed || "zns:agent:" || uint32_be(index)
+    derivation_input = dev_priv_bytes + b"zns:agent:" + struct.pack(">I", index)
 
     # SHA-512, take first 32 bytes
     derived_seed = hashlib.sha512(derivation_input).digest()[:32]

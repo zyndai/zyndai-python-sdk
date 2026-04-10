@@ -314,7 +314,11 @@ def _agent_register(args: argparse.Namespace):
             # Try to get developer info to find the handle
             import requests as _req
             dev_resp = _req.get(f"{registry_url}/v1/developers/{dev_id}")
-            if dev_resp.status_code == 200:
+            if dev_resp.status_code == 404:
+                print(f"  Warning: Developer {dev_id} not found on registry.", file=sys.stderr)
+                print(f"  Ensure you completed onboarding: zynd auth login --registry {registry_url}", file=sys.stderr)
+                agent_name_zns = None
+            elif dev_resp.status_code == 200:
                 dev_info = dev_resp.json()
                 dev_handle = dev_info.get("dev_handle", "")
                 if dev_handle:
@@ -335,8 +339,14 @@ def _agent_register(args: argparse.Namespace):
                     else:
                         print(f"  Agent name '{agent_name_zns}' is available.")
                 else:
-                    print(f"  Warning: Developer has no handle claimed. Agent name binding will be skipped.")
+                    print(f"  Warning: Developer has no handle claimed on this registry.", file=sys.stderr)
+                    print(f"  Agent name binding will be skipped.", file=sys.stderr)
+                    print(f"  Ensure you completed onboarding at the dashboard, or re-run:", file=sys.stderr)
+                    print(f"    zynd auth login --registry {registry_url}", file=sys.stderr)
                     agent_name_zns = None
+            else:
+                print(f"  Warning: Could not fetch developer info (HTTP {dev_resp.status_code}).", file=sys.stderr)
+                agent_name_zns = None
         except Exception as e:
             print(f"  Warning: Could not check agent name availability: {e}")
 

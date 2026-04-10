@@ -17,6 +17,7 @@ from pathlib import Path
 DEFAULT_REGISTRY_URL = "https://dns01.zynd.ai"
 ZYND_DIR_NAME = ".zynd"
 AGENTS_DIR_NAME = "agents"
+SERVICES_DIR_NAME = "services"
 CONFIG_FILE = "config.json"
 DEVELOPER_KEY_FILE = "developer.json"
 
@@ -27,10 +28,11 @@ def zynd_dir() -> Path:
 
 
 def ensure_zynd_dir() -> Path:
-    """Create ~/.zynd/ and ~/.zynd/agents/ if they don't exist."""
+    """Create ~/.zynd/, ~/.zynd/agents/, and ~/.zynd/services/ if they don't exist."""
     d = zynd_dir()
     d.mkdir(parents=True, exist_ok=True)
     (d / AGENTS_DIR_NAME).mkdir(exist_ok=True)
+    (d / SERVICES_DIR_NAME).mkdir(exist_ok=True)
     return d
 
 
@@ -55,6 +57,21 @@ def agent_dir(agent_name: str) -> Path:
 def agent_keypair_path(agent_name: str) -> Path:
     """Return ~/.zynd/agents/<agent_name>/keypair.json."""
     return agent_dir(agent_name) / "keypair.json"
+
+
+def services_dir() -> Path:
+    return zynd_dir() / SERVICES_DIR_NAME
+
+
+def service_dir(service_name: str) -> Path:
+    """Return ~/.zynd/services/<service_name>/."""
+    safe_name = service_name.lower().replace(" ", "-")
+    return services_dir() / safe_name
+
+
+def service_keypair_path(service_name: str) -> Path:
+    """Return ~/.zynd/services/<service_name>/keypair.json."""
+    return service_dir(service_name) / "keypair.json"
 
 
 def load_config() -> dict:
