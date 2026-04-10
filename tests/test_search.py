@@ -176,7 +176,7 @@ class TestGetAgentById:
         mgr = SearchAndDiscoveryManager()
         result = mgr.get_agent_by_id("agdns:abc")
         assert result["agent_id"] == "agdns:abc"
-        mock_get.assert_called_once_with("http://localhost:8080/v1/agents/agdns:abc")
+        mock_get.assert_called_once_with("http://localhost:8080/v1/entities/agdns:abc")
 
     @patch("zyndai_agent.dns_registry.requests.get")
     def test_get_agent_not_found(self, mock_get):

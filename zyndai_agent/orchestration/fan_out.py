@@ -99,17 +99,60 @@ async def fan_out(
                 )
 
             if not agents_found:
-                task.mark_failed(f"No agent found for '{capability}'")
+                task.mark_failed(f"No agent or service found for '{capability}'")
                 return FanOutResult(
                     capability=capability,
                     status="error",
-                    error=f"No agent found for '{capability}'",
+                    error=f"No agent or service found for '{capability}'",
                     task=task,
                 )
 
             target = agents_found[0]
             target_name = target.get("name", "unknown")
-            agent_url = target.get("agent_url", "")
+            entity_type = target.get("entity_type") or target.get("type", "agent")
+
+            # Services get a direct HTTP call, agents get InvokeMessage
+            if entity_type == "service":
+                endpoint = target.get("service_endpoint") or target.get("entity_url") or target.get("agent_url", "")
+                task.assigned_to = endpoint
+                task.mark_running()
+
+                x402_proc = getattr(agent, "x402_processor", None)
+                http_session = x402_proc.session if x402_proc and hasattr(x402_proc, "session") else requests_lib
+
+                try:
+                    resp = await asyncio.to_thread(
+                        http_session.post, endpoint,
+                        json={"query": description, "task": description},
+                        timeout=timeout,
+                    )
+                    if resp.status_code < 400:
+                        try:
+                            result_dict = resp.json()
+                        except Exception:
+                            result_dict = {"raw": resp.text}
+                        task.mark_completed(result_dict)
+                        return FanOutResult(
+                            capability=capability, agent_name=target_name,
+                            agent_url=endpoint, status="success",
+                            result=result_dict, task=task,
+                        )
+                    else:
+                        error = f"Service returned HTTP {resp.status_code}"
+                        task.mark_failed(error)
+                        return FanOutResult(
+                            capability=capability, agent_name=target_name,
+                            agent_url=endpoint, status="error", error=error, task=task,
+                        )
+                except Exception as e:
+                    task.mark_failed(str(e))
+                    return FanOutResult(
+                        capability=capability, agent_name=target_name,
+                        agent_url=endpoint, status="error", error=str(e), task=task,
+                    )
+
+            # Agent path: InvokeMessage to webhook
+            agent_url = target.get("entity_url") or target.get("agent_url", "")
             invoke_url = f"{agent_url.rstrip('/')}/webhook/sync"
 
             task.assigned_to = invoke_url
