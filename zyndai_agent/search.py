@@ -220,10 +220,27 @@ class SearchAndDiscoveryManager:
             raise ValueError(f"No service found matching '{keyword}'")
         service = services[0]
         logger.info(f"Using service: {service.get('name')} ({service.get('agent_id')})")
-        return self.call_service(
-            service_id=service.get("agent_id"),
-            method=method, path=path, params=params, body=body, timeout=timeout,
+
+        # Use endpoint directly from search result (avoids extra lookup)
+        endpoint = service.get("service_endpoint") or service.get("entity_url") or service.get("agent_url")
+        if not endpoint:
+            raise ValueError(f"Service '{service.get('name')}' has no endpoint URL")
+
+        url = endpoint.rstrip("/") + path
+        session = getattr(self, "x402_processor", None)
+        http = session.session if session and hasattr(session, "session") else requests
+
+        resp = http.request(
+            method=method.upper(), url=url, params=params,
+            json=body if method.upper() in ("POST", "PUT", "PATCH") else None,
+            timeout=timeout,
         )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"Service '{service.get('name')}' returned {resp.status_code}: {resp.text[:200]}")
+        try:
+            return resp.json()
+        except Exception:
+            return {"raw": resp.text}
 
     def get_agent_card(self, agent_id: str) -> Optional[dict]:
         """
