@@ -121,11 +121,35 @@ async def fan_out(
                 http_session = x402_proc.session if x402_proc and hasattr(x402_proc, "session") else requests_lib
 
                 try:
-                    resp = await asyncio.to_thread(
-                        http_session.post, endpoint,
-                        json={"query": description, "task": description},
-                        timeout=timeout,
-                    )
+                    # Services have varied APIs — try multiple patterns:
+                    # 1. GET /search?query=... (search-style services)
+                    # 2. GET /?query=... (generic query)
+                    # 3. POST / with JSON body (action-style services)
+                    resp = None
+                    for attempt_url, attempt_params, attempt_method in [
+                        (f"{endpoint}/search", {"query": description}, "GET"),
+                        (endpoint, {"query": description}, "GET"),
+                        (endpoint, None, "POST"),
+                    ]:
+                        try:
+                            if attempt_method == "GET":
+                                resp = await asyncio.to_thread(
+                                    http_session.get, attempt_url,
+                                    params=attempt_params, timeout=timeout,
+                                )
+                            else:
+                                resp = await asyncio.to_thread(
+                                    http_session.post, attempt_url,
+                                    json={"query": description, "task": description},
+                                    timeout=timeout,
+                                )
+                            if resp.status_code < 400:
+                                break
+                        except Exception:
+                            continue
+
+                    if resp is None:
+                        raise RuntimeError("All request patterns failed")
                     if resp.status_code < 400:
                         try:
                             result_dict = resp.json()
