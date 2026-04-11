@@ -86,7 +86,7 @@ class WebhookCommunicationManager:
         self._lock = threading.Lock()
 
         # Create Flask app
-        self.flask_app = Flask(f"agent_{agent_id}")
+        self.flask_app = Flask(f"entity_{agent_id}")
         self.flask_app.logger.setLevel(logging.ERROR)  # Suppress Flask logging
 
         if price is not None and pay_to_address is not None:
@@ -134,7 +134,7 @@ class WebhookCommunicationManager:
         if self.use_ngrok:
             self._start_ngrok_tunnel()
 
-        print("Agent webhook server started")
+        print("Webhook server started")
         print(f"Listening on {self.webhook_url}")
 
     def _setup_routes(self):
@@ -160,7 +160,7 @@ class WebhookCommunicationManager:
             if self.agent_card_builder:
                 card = self.agent_card_builder()
                 return jsonify(card), 200
-            return jsonify({"error": "Agent Card not configured"}), 404
+            return jsonify({"error": "Entity Card not configured"}), 404
 
     def _handle_webhook_request(self, sync=False):
         """Handle incoming webhook POST requests."""
@@ -233,7 +233,7 @@ class WebhookCommunicationManager:
                     {
                         "status": "timeout",
                         "message_id": message.message_id,
-                        "error": "Agent did not respond within timeout period",
+                        "error": "Entity did not respond within timeout period",
                         "timestamp": time.time(),
                     }
                 ), 408
@@ -394,7 +394,7 @@ class WebhookCommunicationManager:
             return "Webhook server not running. Cannot send messages."
 
         if not self.target_webhook_url:
-            return "No target agent connected. Use connect_agent() first."
+            return "No target entity connected. Use connect_agent() first."
 
         try:
             # Create structured message
@@ -404,7 +404,9 @@ class WebhookCommunicationManager:
                 receiver_id=receiver_id,
                 message_type=message_type,
                 sender_did=self.identity_credential,
-                sender_public_key=self.keypair.public_key_string if self.keypair else None,
+                sender_public_key=self.keypair.public_key_string
+                if self.keypair
+                else None,
             )
 
             # Convert to dict for JSON serialization
@@ -445,12 +447,12 @@ class WebhookCommunicationManager:
                 return error_msg
 
         except requests.exceptions.Timeout:
-            error_msg = "Error: Request timed out. Target agent may be offline."
+            error_msg = "Error: Request timed out. Target entity may be offline."
             logger.error(error_msg)
             return error_msg
         except requests.exceptions.ConnectionError:
             error_msg = (
-                "Error: Could not connect to target agent. Agent may be offline."
+                "Error: Could not connect to target entity. Entity may be offline."
             )
             logger.error(error_msg)
             return error_msg
@@ -571,8 +573,8 @@ class WebhookCommunicationManager:
                         self.target_webhook_url = invoke_url
                         self.is_agent_connected = True
                         logger.info(
-                            f"Connected to agent {agent.get('agent_id', agent.get('name', 'unknown'))} "
-                            f"via Agent Card at {self.target_webhook_url}"
+                            f"Connected to entity {agent.get('agent_id', agent.get('name', 'unknown'))} "
+                            f"via Card at {self.target_webhook_url}"
                         )
                         return
             except Exception as e:
@@ -582,7 +584,7 @@ class WebhookCommunicationManager:
             self.target_webhook_url = f"{agent_url.rstrip('/')}/webhook/sync"
             self.is_agent_connected = True
             logger.info(
-                f"Connected to agent at {self.target_webhook_url} (direct, no card)"
+                f"Connected to entity at {self.target_webhook_url} (direct, no card)"
             )
             return
 

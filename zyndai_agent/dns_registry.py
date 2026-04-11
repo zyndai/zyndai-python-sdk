@@ -44,7 +44,7 @@ def register_agent(
     """
     # Build signable payload (sorted keys to match Go's json.Marshal)
     signable = {
-        "agent_url": agent_url or "",
+        "entity_url": agent_url or "",
         "category": category,
         "name": name,
         "public_key": keypair.public_key_string,
@@ -53,13 +53,15 @@ def register_agent(
     }
     if entity_type:
         signable["type"] = entity_type
-    signable_bytes = json.dumps(signable, sort_keys=True, separators=(",", ":")).encode()
+    signable_bytes = json.dumps(
+        signable, sort_keys=True, separators=(",", ":")
+    ).encode()
     signature = sign(keypair.private_key, signable_bytes)
 
     # Build full registration request
     body = {
         "name": name,
-        "agent_url": agent_url or "",
+        "entity_url": agent_url or "",
         "category": category,
         "tags": tags or [],
         "summary": summary or "",
@@ -116,7 +118,11 @@ def check_handle_available(registry_url: str, handle: str) -> dict:
         resp = requests.get(f"{registry_url}/v1/handles/{handle}/available")
         if resp.status_code == 200:
             return resp.json()
-        return {"handle": handle, "available": False, "reason": f"HTTP {resp.status_code}"}
+        return {
+            "handle": handle,
+            "available": False,
+            "reason": f"HTTP {resp.status_code}",
+        }
     except requests.RequestException as e:
         return {"handle": handle, "available": False, "reason": str(e)}
 
@@ -125,8 +131,8 @@ def check_agent_name_available(
     registry_url: str, developer_handle: str, agent_name: str
 ) -> dict:
     """
-    Check if an agent name is available under a developer handle.
-    GET /v1/names/{developer}/{agent}/available
+    Check if an entity name is available under a developer handle.
+    GET /v1/names/{developer}/{entity}/available
 
     Returns:
         dict with keys: developer, agent_name, available (bool), reason (optional),
@@ -153,16 +159,19 @@ def check_agent_name_available(
         }
 
 
-def get_agent(registry_url: str, agent_id: str) -> Optional[dict]:
+def get_agent(
+    registry_url: str, agent_id: str, entity_type: Optional[str] = None
+) -> Optional[dict]:
     """
-    Look up an agent by ID.
-    GET /v1/agents/{agent_id}
+    Look up an entity by ID.
+    GET /v1/entities/{agent_id}
     """
+    label = entity_type or "entity"
     try:
         resp = requests.get(f"{registry_url}/v1/entities/{agent_id}")
         if resp.status_code == 200:
             return resp.json()
-        logger.error(f"Failed to get agent {agent_id}: {resp.status_code}")
+        logger.error(f"Failed to get {label} {agent_id}: {resp.status_code}")
         return None
     except requests.RequestException as e:
         logger.error(f"Request failed: {e}")
@@ -174,15 +183,17 @@ def update_agent(
     agent_id: str,
     keypair: Ed25519Keypair,
     updates: dict,
+    entity_type: Optional[str] = None,
 ) -> bool:
     """
-    Update an agent's registration.
-    PUT /v1/agents/{agent_id} with Authorization: Bearer ed25519:<sig>
+    Update an entity's registration.
+    PUT /v1/entities/{agent_id} with Authorization: Bearer ed25519:<sig>
 
     The server verifies the Bearer signature against the request body bytes.
     Adds a body-level signature over the update fields, then signs the full
     body for the Authorization header.
     """
+    label = entity_type or "entity"
     # Sign the update content (excluding signature field itself)
     signable_bytes = json.dumps(updates, sort_keys=True, separators=(",", ":")).encode()
     updates["signature"] = sign(keypair.private_key, signable_bytes)
@@ -204,7 +215,12 @@ def update_agent(
         )
         if resp.status_code == 200:
             return True
-        logger.error(f"Failed to update agent {agent_id}: {resp.status_code} {resp.text}")
+        logger.error(
+            f"Failed to update {label} {agent_id}: {resp.status_code} {resp.text}"
+        )
+        return False
+    except requests.RequestException as e:
+        logger.error(f"Request failed: {e}")
         return False
     except requests.RequestException as e:
         logger.error(f"Request failed: {e}")
@@ -215,11 +231,13 @@ def delete_agent(
     registry_url: str,
     agent_id: str,
     keypair: Ed25519Keypair,
+    entity_type: Optional[str] = None,
 ) -> bool:
     """
-    Delete an agent's registration.
-    DELETE /v1/agents/{agent_id} with Authorization: Bearer ed25519:<sig>
+    Delete an entity's registration.
+    DELETE /v1/entities/{agent_id} with Authorization: Bearer ed25519:<sig>
     """
+    label = entity_type or "entity"
     auth_sig = sign(keypair.private_key, agent_id.encode())
     headers = {
         "Authorization": f"Bearer {auth_sig}",
@@ -232,7 +250,7 @@ def delete_agent(
         )
         if resp.status_code in (200, 204):
             return True
-        logger.error(f"Failed to delete agent {agent_id}: {resp.status_code}")
+        logger.error(f"Failed to delete {label} {agent_id}: {resp.status_code}")
         return False
     except requests.RequestException as e:
         logger.error(f"Request failed: {e}")
@@ -337,16 +355,19 @@ def search_agents(
         return {"results": [], "total_found": 0, "has_more": False}
 
 
-def get_agent_card(registry_url: str, agent_id: str) -> Optional[dict]:
+def get_agent_card(
+    registry_url: str, agent_id: str, entity_type: Optional[str] = None
+) -> Optional[dict]:
     """
-    Fetch an agent's Agent Card.
-    GET /v1/agents/{agent_id}/card
+    Fetch an entity's Card.
+    GET /v1/entities/{agent_id}/card
     """
+    label = entity_type or "entity"
     try:
         resp = requests.get(f"{registry_url}/v1/entities/{agent_id}/card")
         if resp.status_code == 200:
             return resp.json()
-        logger.error(f"Failed to get agent card for {agent_id}: {resp.status_code}")
+        logger.error(f"Failed to get {label} card for {agent_id}: {resp.status_code}")
         return None
     except requests.RequestException as e:
         logger.error(f"Request failed: {e}")

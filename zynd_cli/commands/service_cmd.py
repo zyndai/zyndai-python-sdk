@@ -36,7 +36,9 @@ from zynd_cli.config import (
 
 
 def register_parser(subparsers: argparse._SubParsersAction, parents=None):
-    p = subparsers.add_parser("service", help="Service project management", parents=parents or [])
+    p = subparsers.add_parser(
+        "service", help="Service project management", parents=parents or []
+    )
     sub = p.add_subparsers(dest="service_command")
 
     # zynd service init
@@ -47,12 +49,16 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
 
     # zynd service register
     reg_p = sub.add_parser("register", help="Register service on the network")
-    reg_p.add_argument("--config", default="service.config.json", help="Path to service.config.json")
+    reg_p.add_argument(
+        "--config", default="service.config.json", help="Path to service.config.json"
+    )
     reg_p.set_defaults(func=_service_register)
 
     # zynd service update
     upd_p = sub.add_parser("update", help="Push config changes to registry")
-    upd_p.add_argument("--config", default="service.config.json", help="Path to service.config.json")
+    upd_p.add_argument(
+        "--config", default="service.config.json", help="Path to service.config.json"
+    )
     upd_p.set_defaults(func=_service_update)
 
     # zynd service run
@@ -126,10 +132,14 @@ def _service_init(args: argparse.Namespace):
     kp_dir = service_dir(svc_safe)
     kp_dir.mkdir(parents=True, exist_ok=True)
     kp_path = service_keypair_path(svc_safe)
-    save_keypair(svc_kp, str(kp_path), derivation_metadata={
-        "developer_public_key": dev_kp.public_key_b64,
-        "index": index,
-    })
+    save_keypair(
+        svc_kp,
+        str(kp_path),
+        derivation_metadata={
+            "developer_public_key": dev_kp.public_key_b64,
+            "index": index,
+        },
+    )
 
     registry_url = get_registry_url(getattr(args, "registry", None))
 
@@ -183,15 +193,19 @@ def _service_init(args: argparse.Namespace):
     well_known = Path(".well-known")
     well_known.mkdir(exist_ok=True)
     with open(well_known / "agent.json", "w") as f:
-        json.dump({
-            "name": name,
-            "type": "service",
-            "description": description,
-            "category": category,
-            "service_endpoint": service_endpoint,
-            "openapi_url": openapi_url,
-            "_note": "This file is auto-regenerated when the service runs.",
-        }, f, indent=2)
+        json.dump(
+            {
+                "name": name,
+                "type": "service",
+                "description": description,
+                "category": category,
+                "service_endpoint": service_endpoint,
+                "openapi_url": openapi_url,
+                "_note": "This file is auto-regenerated when the service runs.",
+            },
+            f,
+            indent=2,
+        )
 
     print(f"\n  Service project created!")
     print(f"    Name:       {name}")
@@ -237,7 +251,7 @@ def _service_register(args: argparse.Namespace):
     service_name_zns = config.get("service_name", "")
 
     # Check if already registered
-    existing = get_agent(registry_url, kp.agent_id)
+    existing = get_agent(registry_url, kp.agent_id, entity_type="service")
     already_registered = existing is not None
 
     if already_registered:
@@ -248,7 +262,9 @@ def _service_register(args: argparse.Namespace):
             "tags": config.get("tags", []),
             "summary": config.get("summary", ""),
         }
-        success = update_agent(registry_url, kp.agent_id, kp, update_body)
+        success = update_agent(
+            registry_url, kp.agent_id, kp, update_body, entity_type="service"
+        )
         if success:
             fqan = get_agent_fqan(registry_url, kp.agent_id)
             print(f"\n  Service updated!")
@@ -316,7 +332,9 @@ def _service_update(args: argparse.Namespace):
     }
 
     print(f"Updating service on the network...")
-    success = update_agent(registry_url, kp.agent_id, kp, update_body)
+    success = update_agent(
+        registry_url, kp.agent_id, kp, update_body, entity_type="service"
+    )
     if success:
         fqan = get_agent_fqan(registry_url, kp.agent_id)
         print(f"\n  Service updated!")
