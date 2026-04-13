@@ -253,12 +253,19 @@ def _agent_init(args: argparse.Namespace):
 
 
 def _agent_register(args: argparse.Namespace):
-    """Register agent on the network from agent.config.json."""
+    """Start the agent, health-check it, register on registry, and keep running."""
+    import subprocess
+    import time
+    import requests as _req
 
     config_path = args.config
     if not os.path.exists(config_path):
         print(f"Error: {config_path} not found.", file=sys.stderr)
         print("Run 'zynd agent init' first to create an agent project.")
+        sys.exit(1)
+
+    if not os.path.exists("agent.py"):
+        print("Error: agent.py not found in current directory.", file=sys.stderr)
         sys.exit(1)
 
     with open(config_path, "r") as f:
@@ -271,15 +278,9 @@ def _agent_register(args: argparse.Namespace):
 
     kp = load_keypair(keypair_path)
     registry_url = get_registry_url(getattr(args, "registry", None)) or config.get("registry_url", "http://localhost:8080")
-
-    # Check if already registered
-    print(f"Checking registry at {registry_url}...")
-    existing = get_agent(registry_url, kp.agent_id)
-    already_registered = existing is not None
-
-    if already_registered:
-        print(f"Agent already registered: {kp.agent_id}")
-        print(f"  Updating registration...")
+    port = config.get("webhook_port", 5000)
+    agent_url = args.agent_url or config.get("agent_url", f"http://localhost:{port}")
+    health_url = f"http://localhost:{port}/health"
 
     # Load developer key for proof
     dev_key = developer_key_path()
@@ -288,71 +289,86 @@ def _agent_register(args: argparse.Namespace):
         sys.exit(1)
 
     dev_kp = load_keypair(str(dev_key))
-
-    # Get derivation metadata for proof
     _, metadata = load_keypair_with_metadata(keypair_path)
     derived_from = metadata.get("derived_from", {})
     agent_index = derived_from.get("index", config.get("agent_index", 0))
-
     proof = create_derivation_proof(dev_kp, kp.public_key, agent_index)
-
-    # Build developer ID from developer public key
     dev_id = generate_developer_id(dev_kp.public_key_bytes)
 
-    agent_url = args.agent_url or config.get("agent_url", f"http://localhost:{config.get('webhook_port', 5000)}")
+    from rich.console import Console
+    console = Console()
 
-    # Check agent name availability before registering (if agent_name is in config)
+    # --- Step 1: Start the agent as a background process ---
+    console.print()
+    console.print(f"  [bold #8B5CF6]▶[/bold #8B5CF6] Starting [bold]{config.get('name', 'agent')}[/bold]...")
+
+    env = os.environ.copy()
+    if keypair_path:
+        env["ZYND_AGENT_KEYPAIR_PATH"] = keypair_path
+    if registry_url:
+        env["ZYND_REGISTRY_URL"] = registry_url
+
+    proc = subprocess.Popen(
+        [sys.executable, "agent.py"],
+        env=env,
+        stdout=None,
+        stderr=None,
+    )
+
+    # --- Step 2: Health-check (poll /health for up to 15s) ---
+    console.print(f"  [dim]Waiting for agent to start (health: {health_url})...[/dim]")
+    healthy = False
+    for i in range(30):
+        if proc.poll() is not None:
+            console.print(f"  [bold red]✗[/bold red] Agent process exited with code {proc.returncode}")
+            sys.exit(1)
+        try:
+            resp = _req.get(health_url, timeout=1)
+            if resp.status_code == 200:
+                healthy = True
+                break
+        except _req.ConnectionError:
+            pass
+        time.sleep(0.5)
+
+    if not healthy:
+        console.print(f"  [bold red]✗[/bold red] Agent did not become healthy within 15s")
+        proc.terminate()
+        sys.exit(1)
+
+    console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent is healthy")
+
+    # --- Step 3: Check name availability ---
     agent_name_zns = config.get("agent_name")
     if agent_name_zns:
-        # We need the developer's handle to check. Load it from the registry.
-        # The developer handle is stored on the registry, so we check via the names API.
-        print(f"Checking if agent name '{agent_name_zns}' is available...")
-        # We need the developer handle — try to derive it from developer info on the registry
-        # For now, use the dev_id to look up. The availability check uses the handle,
-        # but we may not have it locally. Try to check via the registry API.
         try:
-            # Try to get developer info to find the handle
-            import requests as _req
             dev_resp = _req.get(f"{registry_url}/v1/developers/{dev_id}")
-            if dev_resp.status_code == 404:
-                print(f"  Warning: Developer {dev_id} not found on registry.", file=sys.stderr)
-                print(f"  Ensure you completed onboarding: zynd auth login --registry {registry_url}", file=sys.stderr)
-                agent_name_zns = None
-            elif dev_resp.status_code == 200:
-                dev_info = dev_resp.json()
-                dev_handle = dev_info.get("dev_handle", "")
+            if dev_resp.status_code == 200:
+                dev_handle = dev_resp.json().get("dev_handle", "")
                 if dev_handle:
                     avail = check_agent_name_available(registry_url, dev_handle, agent_name_zns)
                     if not avail.get("available", True):
                         existing_id = avail.get("existing_agent_id", "")
-                        # Only fail if the existing agent has a different key
                         if existing_id and existing_id != kp.agent_id:
-                            print(f"\nError: Agent name '{agent_name_zns}' is already taken under '{dev_handle}'.", file=sys.stderr)
-                            print(f"  Existing agent: {existing_id}", file=sys.stderr)
-                            print(f"  Choose a different agent_name in agent.config.json.", file=sys.stderr)
-                            sys.exit(1)
-                        elif not existing_id:
-                            reason = avail.get("reason", "already taken")
-                            print(f"\nError: Agent name '{agent_name_zns}' is not available: {reason}", file=sys.stderr)
-                            print(f"  Update agent_name in agent.config.json.", file=sys.stderr)
+                            console.print(f"  [bold red]✗[/bold red] Name '{agent_name_zns}' already taken by {existing_id}")
+                            proc.terminate()
                             sys.exit(1)
                     else:
-                        print(f"  Agent name '{agent_name_zns}' is available.")
+                        console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Name '{agent_name_zns}' is available")
                 else:
-                    print(f"  Warning: Developer has no handle claimed on this registry.", file=sys.stderr)
-                    print(f"  Agent name binding will be skipped.", file=sys.stderr)
-                    print(f"  Ensure you completed onboarding at the dashboard, or re-run:", file=sys.stderr)
-                    print(f"    zynd auth login --registry {registry_url}", file=sys.stderr)
+                    console.print(f"  [dim]Warning: No developer handle — name binding skipped[/dim]")
                     agent_name_zns = None
-            else:
-                print(f"  Warning: Could not fetch developer info (HTTP {dev_resp.status_code}).", file=sys.stderr)
+            elif dev_resp.status_code == 404:
+                console.print(f"  [dim]Warning: Developer not found on registry — name binding skipped[/dim]")
                 agent_name_zns = None
         except Exception as e:
-            print(f"  Warning: Could not check agent name availability: {e}")
+            console.print(f"  [dim]Warning: Could not check name: {e}[/dim]")
 
-    if already_registered:
-        # Update the existing registration with correct data
-        print(f"Updating agent on the network...")
+    # --- Step 4: Register or update on registry ---
+    existing = get_agent(registry_url, kp.agent_id)
+
+    if existing is not None:
+        console.print(f"  [dim]Agent already registered — updating...[/dim]")
         update_body = {
             "name": config["name"],
             "entity_url": agent_url,
@@ -363,17 +379,12 @@ def _agent_register(args: argparse.Namespace):
         success = update_agent(registry_url, kp.agent_id, kp, update_body)
         if success:
             fqan = get_agent_fqan(registry_url, kp.agent_id)
-            print(f"\nAgent updated!")
-            print(f"  Agent ID: {kp.agent_id}")
+            console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent updated on registry")
             if fqan:
-                print(f"  FQAN:     {fqan}")
-            print(f"  Name:     {config['name']}")
-            print(f"  URL:      {agent_url}")
+                console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
         else:
-            print(f"Update failed.", file=sys.stderr)
-            sys.exit(1)
+            console.print(f"  [bold red]✗[/bold red] Update failed")
     else:
-        print(f"Registering agent on the network...")
         try:
             agent_id = register_agent(
                 registry_url=registry_url,
@@ -389,17 +400,27 @@ def _agent_register(args: argparse.Namespace):
                 entity_pricing=config.get("entity_pricing"),
             )
             fqan = get_agent_fqan(registry_url, agent_id)
-            print(f"\nAgent registered!")
-            print(f"  Agent ID: {agent_id}")
+            console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent registered: {agent_id}")
             if fqan:
-                print(f"  FQAN:     {fqan}")
-            print(f"  Name:     {config['name']}")
+                console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
             if agent_name_zns:
-                print(f"  ZNS Name: {agent_name_zns}")
-            print(f"  URL:      {agent_url}")
+                console.print(f"  [dim]ZNS Name:[/dim] {agent_name_zns}")
         except Exception as e:
-            print(f"Registration failed: {e}", file=sys.stderr)
-            sys.exit(1)
+            console.print(f"  [bold red]✗[/bold red] Registration failed: {e}")
+
+    # --- Step 5: Keep the agent running ---
+    console.print()
+    console.print(f"  [bold green]Agent is running.[/bold green] Press Ctrl+C to stop.")
+    console.print()
+    try:
+        proc.wait()
+    except KeyboardInterrupt:
+        console.print(f"\n  [dim]Stopping agent...[/dim]")
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def _agent_update(args: argparse.Namespace):

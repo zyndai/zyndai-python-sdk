@@ -219,22 +219,38 @@ def _service_init(args: argparse.Namespace):
 
 
 def _service_register(args: argparse.Namespace):
-    """Register a service on the registry."""
+    """Start the service, health-check it, register on registry, and keep running."""
+    import subprocess
+    import time
+    import requests as _req
+
     config_path = args.config
     if not os.path.exists(config_path):
         print(f"Error: {config_path} not found.", file=sys.stderr)
         sys.exit(1)
 
+    script_file = "service.py"
+    if not os.path.exists(script_file):
+        print(f"Error: {script_file} not found in current directory.", file=sys.stderr)
+        sys.exit(1)
+
     with open(config_path) as f:
         config = json.load(f)
 
-    registry_url = get_registry_url(getattr(args, "registry", None))
     kp_path = config.get("keypair_path")
     if not kp_path or not os.path.exists(kp_path):
         print("Error: keypair_path not found in config.", file=sys.stderr)
         sys.exit(1)
 
     kp, meta = load_keypair_with_metadata(kp_path)
+    registry_url = get_registry_url(getattr(args, "registry", None))
+    port = config.get("webhook_port", 5000)
+    health_url = f"http://localhost:{port}/health"
+
+    service_endpoint = config.get("service_endpoint")
+    if not service_endpoint:
+        service_endpoint = f"http://localhost:{port}"
+
     dev_path = developer_key_path()
     if not dev_path.exists():
         print("Error: Developer keypair not found.", file=sys.stderr)
@@ -242,26 +258,59 @@ def _service_register(args: argparse.Namespace):
 
     dev_kp = load_keypair(str(dev_path))
     dev_id = generate_developer_id(dev_kp.public_key_bytes)
-
-    # Create derivation proof
     derived = meta.get("derived_from", {})
     agent_index = derived.get("index", config.get("agent_index", 0))
     proof = create_derivation_proof(dev_kp, kp.public_key, agent_index)
-
     service_name_zns = config.get("service_name", "")
 
-    # Auto-derive service_endpoint from webhook_port if not set
-    service_endpoint = config.get("service_endpoint")
-    if not service_endpoint:
-        port = config.get("webhook_port", 5000)
-        service_endpoint = f"http://localhost:{port}"
+    from rich.console import Console
+    console = Console()
 
-    # Check if already registered
+    # --- Step 1: Start the service as a background process ---
+    console.print()
+    console.print(f"  [bold #8B5CF6]▶[/bold #8B5CF6] Starting [bold]{config.get('name', 'service')}[/bold]...")
+
+    env = os.environ.copy()
+    if kp_path:
+        env["ZYND_SERVICE_KEYPAIR_PATH"] = kp_path
+    if registry_url:
+        env["ZYND_REGISTRY_URL"] = registry_url
+
+    proc = subprocess.Popen(
+        [sys.executable, script_file],
+        env=env,
+        stdout=None,
+        stderr=None,
+    )
+
+    # --- Step 2: Health-check ---
+    console.print(f"  [dim]Waiting for service to start (health: {health_url})...[/dim]")
+    healthy = False
+    for i in range(30):
+        if proc.poll() is not None:
+            console.print(f"  [bold red]✗[/bold red] Service process exited with code {proc.returncode}")
+            sys.exit(1)
+        try:
+            resp = _req.get(health_url, timeout=1)
+            if resp.status_code == 200:
+                healthy = True
+                break
+        except _req.ConnectionError:
+            pass
+        time.sleep(0.5)
+
+    if not healthy:
+        console.print(f"  [bold red]✗[/bold red] Service did not become healthy within 15s")
+        proc.terminate()
+        sys.exit(1)
+
+    console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Service is healthy")
+
+    # --- Step 3: Register or update on registry ---
     existing = get_agent(registry_url, kp.agent_id, entity_type="service")
-    already_registered = existing is not None
 
-    if already_registered:
-        print(f"Updating service on the network...")
+    if existing is not None:
+        console.print(f"  [dim]Service already registered — updating...[/dim]")
         update_body = {
             "name": config["name"],
             "category": config.get("category", "general"),
@@ -273,15 +322,12 @@ def _service_register(args: argparse.Namespace):
         )
         if success:
             fqan = get_agent_fqan(registry_url, kp.agent_id)
-            print(f"\n  Service updated!")
-            print(f"    Service ID: {kp.agent_id}")
+            console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Service updated on registry")
             if fqan:
-                print(f"    FQAN:       {fqan}")
+                console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
         else:
-            print("Update failed.", file=sys.stderr)
-            sys.exit(1)
+            console.print(f"  [bold red]✗[/bold red] Update failed")
     else:
-        print(f"Registering service on the network...")
         try:
             service_id = register_agent(
                 registry_url=registry_url,
@@ -300,16 +346,27 @@ def _service_register(args: argparse.Namespace):
                 entity_pricing=config.get("entity_pricing"),
             )
             fqan = get_agent_fqan(registry_url, service_id)
-            print(f"\n  Service registered!")
-            print(f"    Service ID: {service_id}")
+            console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Service registered: {service_id}")
             if fqan:
-                print(f"    FQAN:       {fqan}")
-            print(f"    Name:       {config['name']}")
+                console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
             if service_name_zns:
-                print(f"    ZNS Name:   {service_name_zns}")
+                console.print(f"  [dim]ZNS Name:[/dim] {service_name_zns}")
         except Exception as e:
-            print(f"Registration failed: {e}", file=sys.stderr)
-            sys.exit(1)
+            console.print(f"  [bold red]✗[/bold red] Registration failed: {e}")
+
+    # --- Step 4: Keep the service running ---
+    console.print()
+    console.print(f"  [bold green]Service is running.[/bold green] Press Ctrl+C to stop.")
+    console.print()
+    try:
+        proc.wait()
+    except KeyboardInterrupt:
+        console.print(f"\n  [dim]Stopping service...[/dim]")
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def _service_update(args: argparse.Namespace):
