@@ -113,7 +113,11 @@ class ZyndBase(
                 "or provide keypair_path in config."
             )
 
-        self.agent_id = self.keypair.agent_id
+        if self._entity_type == "service":
+            from zyndai_agent.ed25519_identity import generate_service_id
+            self.agent_id = generate_service_id(self.keypair.public_key_bytes)
+        else:
+            self.agent_id = self.keypair.agent_id
 
         # x402 payment
         self.x402_processor = X402PaymentProcessor(

@@ -243,6 +243,7 @@ def _service_register(args: argparse.Namespace):
         sys.exit(1)
 
     kp, meta = load_keypair_with_metadata(kp_path)
+    service_id = generate_service_id(kp.public_key_bytes)
     registry_url = get_registry_url(getattr(args, "registry", None))
     port = config.get("webhook_port", 5000)
     health_url = f"http://localhost:{port}/health"
@@ -307,7 +308,7 @@ def _service_register(args: argparse.Namespace):
     console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Service is healthy")
 
     # --- Step 3: Register or update on registry ---
-    existing = get_agent(registry_url, kp.agent_id, entity_type="service")
+    existing = get_agent(registry_url, service_id, entity_type="service")
 
     if existing is not None:
         console.print(f"  [dim]Service already registered — updating...[/dim]")
@@ -318,10 +319,10 @@ def _service_register(args: argparse.Namespace):
             "summary": config.get("summary", ""),
         }
         success = update_agent(
-            registry_url, kp.agent_id, kp, update_body, entity_type="service"
+            registry_url, service_id, kp, update_body, entity_type="service"
         )
         if success:
-            fqan = get_agent_fqan(registry_url, kp.agent_id)
+            fqan = get_agent_fqan(registry_url, service_id)
             console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Service updated on registry")
             if fqan:
                 console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
@@ -386,6 +387,7 @@ def _service_update(args: argparse.Namespace):
         sys.exit(1)
 
     kp = load_keypair(kp_path)
+    svc_id = generate_service_id(kp.public_key_bytes)
 
     update_body = {
         "name": config["name"],
@@ -396,12 +398,12 @@ def _service_update(args: argparse.Namespace):
 
     print(f"Updating service on the network...")
     success = update_agent(
-        registry_url, kp.agent_id, kp, update_body, entity_type="service"
+        registry_url, svc_id, kp, update_body, entity_type="service"
     )
     if success:
-        fqan = get_agent_fqan(registry_url, kp.agent_id)
+        fqan = get_agent_fqan(registry_url, svc_id)
         print(f"\n  Service updated!")
-        print(f"    Service ID: {kp.agent_id}")
+        print(f"    Service ID: {svc_id}")
         if fqan:
             print(f"    FQAN:       {fqan}")
     else:
