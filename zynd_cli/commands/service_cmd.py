@@ -291,7 +291,7 @@ def _service_register(args: argparse.Namespace):
                 entity_type="service",
                 service_endpoint=config.get("service_endpoint"),
                 openapi_url=config.get("openapi_url"),
-                pricing_model=config.get("pricing_model"),
+                entity_pricing=config.get("entity_pricing"),
             )
             fqan = get_agent_fqan(registry_url, service_id)
             print(f"\n  Service registered!")

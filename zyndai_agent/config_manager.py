@@ -110,7 +110,7 @@ class ConfigManager:
             "private_key": kp.private_key_b64,
             "name": config.get("name", agent_config.name),
             "description": config.get("description", agent_config.description),
-            "agent_url": agent_url,
+            "entity_url": agent_url,
             "registry_url": agent_config.registry_url,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "legacy_seed": config.get("seed"),  # Preserve for x402 payment continuity
@@ -169,7 +169,7 @@ class ConfigManager:
             "private_key": kp.private_key_b64,
             "name": agent_config.name,
             "description": agent_config.description,
-            "agent_url": agent_url,
+            "entity_url": agent_url,
             "registry_url": agent_config.registry_url,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }

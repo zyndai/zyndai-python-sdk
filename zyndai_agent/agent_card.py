@@ -107,7 +107,7 @@ def build_agent_card(
         "name": name,
         "description": description,
         "public_key": keypair.public_key_string,
-        "agent_url": base_url,
+        "entity_url": base_url,
         "version": version,
         "status": "online",
         "capabilities": capability_list,

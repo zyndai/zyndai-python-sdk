@@ -77,6 +77,7 @@ class ZyndBaseConfig(BaseModel):
 
     # Pricing
     price: Optional[str] = None
+    entity_pricing: Optional[dict] = None
 
     # Identity
     keypair_path: Optional[str] = None

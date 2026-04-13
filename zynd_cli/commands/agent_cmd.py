@@ -355,7 +355,7 @@ def _agent_register(args: argparse.Namespace):
         print(f"Updating agent on the network...")
         update_body = {
             "name": config["name"],
-            "agent_url": agent_url,
+            "entity_url": agent_url,
             "category": config.get("category", "general"),
             "tags": config.get("tags", []),
             "summary": config.get("summary", ""),
@@ -386,6 +386,7 @@ def _agent_register(args: argparse.Namespace):
                 developer_id=dev_id,
                 developer_proof=proof,
                 agent_name=agent_name_zns,
+                entity_pricing=config.get("entity_pricing"),
             )
             fqan = get_agent_fqan(registry_url, agent_id)
             print(f"\nAgent registered!")
@@ -442,7 +443,7 @@ def _agent_update(args: argparse.Namespace):
     # Build update body — all mutable fields from agent.config.json
     update_body = {
         "name": config.get("name", ""),
-        "agent_url": agent_url,
+        "entity_url": agent_url,
         "category": config.get("category", "general"),
         "tags": config.get("tags", []),
         "summary": config.get("summary", ""),
@@ -457,7 +458,7 @@ def _agent_update(args: argparse.Namespace):
         console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent updated on registry")
         console.print(f"  [dim]Agent ID:[/dim]      {kp.agent_id}")
         console.print(f"  [dim]Name:[/dim]          {config.get('name', '')}")
-        console.print(f"  [dim]Agent URL:[/dim]     {agent_url}")
+        console.print(f"  [dim]Entity URL:[/dim]    {agent_url}")
         console.print(f"  [dim]Category:[/dim]      {config.get('category', 'general')}")
         console.print(f"  [dim]Tags:[/dim]          {', '.join(config.get('tags', []))}")
         console.print(f"  [dim]Codebase hash:[/dim] {codebase_hash[:16]}...")

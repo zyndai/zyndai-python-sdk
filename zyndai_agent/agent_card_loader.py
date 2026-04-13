@@ -145,7 +145,7 @@ def build_runtime_card(
     card.setdefault("version", "1.0")
 
     # Build absolute endpoints
-    card["agent_url"] = base_url
+    card["entity_url"] = base_url
     card["endpoints"] = build_endpoints(base_url)
 
     # Runtime timestamps
@@ -221,20 +221,24 @@ def resolve_card_from_config(agent_config) -> dict:
     elif capabilities:
         card["capabilities"] = capabilities
 
-    # Convert price string to pricing dict
-    price = getattr(agent_config, "price", None)
-    if price:
-        amount = price.lstrip("$")
-        try:
-            rate = float(amount)
-        except ValueError:
-            rate = 0.0
-        card["pricing"] = {
-            "model": "per-request",
-            "currency": "USDC",
-            "rates": {"default": rate},
-            "payment_methods": ["x402"],
-        }
+    # Use entity_pricing from config if provided, otherwise derive from price string
+    entity_pricing = getattr(agent_config, "entity_pricing", None)
+    if entity_pricing and isinstance(entity_pricing, dict):
+        card["pricing"] = entity_pricing
+    else:
+        price = getattr(agent_config, "price", None)
+        if price:
+            amount = price.lstrip("$")
+            try:
+                rate = float(amount)
+            except ValueError:
+                rate = 0.0
+            card["pricing"] = {
+                "model": "per-request",
+                "currency": "USDC",
+                "rates": {"default": rate},
+                "payment_methods": ["x402"],
+            }
 
     # Add server section from config
     card["server"] = {

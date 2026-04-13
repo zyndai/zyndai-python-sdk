@@ -31,7 +31,7 @@ def register_agent(
     entity_type: Optional[str] = None,
     service_endpoint: Optional[str] = None,
     openapi_url: Optional[str] = None,
-    pricing_model: Optional[dict] = None,
+    entity_pricing: Optional[dict] = None,
 ) -> str:
     """
     Register an agent or service on the registry.
@@ -52,7 +52,7 @@ def register_agent(
         "tags": tags or [],
     }
     if entity_type:
-        signable["type"] = entity_type
+        signable["entity_type"] = entity_type
     signable_bytes = json.dumps(
         signable, sort_keys=True, separators=(",", ":")
     ).encode()
@@ -70,13 +70,13 @@ def register_agent(
     }
 
     if entity_type:
-        body["type"] = entity_type
+        body["entity_type"] = entity_type
     if service_endpoint:
         body["service_endpoint"] = service_endpoint
     if openapi_url:
         body["openapi_url"] = openapi_url
-    if pricing_model:
-        body["pricing_model"] = pricing_model
+    if entity_pricing:
+        body["entity_pricing"] = entity_pricing
     if capability_summary:
         body["capability_summary"] = capability_summary
     if developer_id:
@@ -328,7 +328,7 @@ def search_agents(
     if fqan:
         body["fqan"] = fqan
     if entity_type:
-        body["type"] = entity_type
+        body["entity_type"] = entity_type
     if offset:
         body["offset"] = offset
     if timeout_ms is not None:
