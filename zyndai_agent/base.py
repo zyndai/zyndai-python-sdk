@@ -209,7 +209,7 @@ class ZyndBase(
             from zyndai_agent.ed25519_identity import sign as ed25519_sign
 
             ws_url = registry_url.replace("https://", "wss://").replace("http://", "ws://")
-            ws_url = f"{ws_url}/v1/agents/{self.agent_id}/ws"
+            ws_url = f"{ws_url}/v1/entities/{self.agent_id}/ws"
 
             while not self._heartbeat_stop.is_set():
                 try:
