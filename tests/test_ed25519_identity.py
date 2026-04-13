@@ -57,8 +57,8 @@ class TestKeypairProperties:
     def test_agent_id_format(self):
         kp = generate_keypair()
         aid = kp.agent_id
-        assert aid.startswith("agdns:")
-        hex_part = aid[len("agdns:"):]
+        assert aid.startswith("zns:")
+        hex_part = aid[len("zns:"):]
         assert len(hex_part) == 32  # 16 bytes = 32 hex chars
 
 
@@ -96,8 +96,8 @@ class TestGenerateAgentId:
     def test_format(self):
         kp = generate_keypair()
         aid = generate_agent_id(kp.public_key_bytes)
-        assert aid.startswith("agdns:")
-        assert len(aid) == 6 + 32  # "agdns:" + 32 hex chars
+        assert aid.startswith("zns:")
+        assert len(aid) == 4 + 32  # "zns:" + 32 hex chars
 
 
 class TestSignVerify:

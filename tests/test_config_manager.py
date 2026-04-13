@@ -27,7 +27,7 @@ class TestConfigManagerPaths:
 class TestConfigManagerSaveLoad:
     def test_save_and_load(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        config = {"agent_id": "agdns:test", "name": "TestAgent", "schema_version": "2.0"}
+        config = {"agent_id": "zns:test", "name": "TestAgent", "schema_version": "2.0"}
         ConfigManager.save_config(config, ".agent-test")
         loaded = ConfigManager.load_config(".agent-test")
         assert loaded == config
@@ -39,7 +39,7 @@ class TestConfigManagerSaveLoad:
 
     def test_save_creates_directory(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        ConfigManager.save_config({"agent_id": "agdns:1"}, ".agent-new")
+        ConfigManager.save_config({"agent_id": "zns:1"}, ".agent-new")
         assert os.path.exists(tmp_path / ".agent-new" / "config.json")
 
 
@@ -47,7 +47,7 @@ class TestConfigManagerCreate:
     @patch("zyndai_agent.config_manager.dns_registry.register_agent")
     def test_create_agent_success(self, mock_register, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        mock_register.return_value = "agdns:test123"
+        mock_register.return_value = "zns:test123"
 
         agent_config = AgentConfig(
             name="New Agent",
@@ -59,7 +59,7 @@ class TestConfigManagerCreate:
         result = ConfigManager.create_agent(agent_config, ".agent-new")
 
         assert result["schema_version"] == "2.0"
-        assert result["agent_id"].startswith("agdns:")
+        assert result["agent_id"].startswith("zns:")
         assert result["public_key"].startswith("ed25519:")
         assert "private_key" in result
         assert result["name"] == "New Agent"
@@ -78,7 +78,7 @@ class TestConfigManagerCreate:
         )
 
         result = ConfigManager.create_agent(agent_config, ".agent-offline")
-        assert result["agent_id"].startswith("agdns:")
+        assert result["agent_id"].startswith("zns:")
         assert os.path.exists(tmp_path / ".agent-offline" / "config.json")
 
 
@@ -88,13 +88,13 @@ class TestLegacyMigration:
         assert ConfigManager._is_legacy_config(legacy) is True
 
     def test_v2_config_is_not_legacy(self):
-        v2 = {"schema_version": "2.0", "agent_id": "agdns:abc"}
+        v2 = {"schema_version": "2.0", "agent_id": "zns:abc"}
         assert ConfigManager._is_legacy_config(v2) is False
 
     @patch("zyndai_agent.config_manager.dns_registry.register_agent")
     def test_auto_migration(self, mock_register, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        mock_register.return_value = "agdns:migrated"
+        mock_register.return_value = "zns:migrated"
 
         # Save a legacy v1 config
         legacy_config = {
@@ -117,7 +117,7 @@ class TestLegacyMigration:
 
         # Should be migrated to v2
         assert result["schema_version"] == "2.0"
-        assert result["agent_id"].startswith("agdns:")
+        assert result["agent_id"].startswith("zns:")
         assert result["public_key"].startswith("ed25519:")
         # Legacy seed should be preserved
         assert result["legacy_seed"] == legacy_config["seed"]
@@ -128,7 +128,7 @@ class TestLoadOrCreate:
         monkeypatch.chdir(tmp_path)
         config = {
             "schema_version": "2.0",
-            "agent_id": "agdns:existing",
+            "agent_id": "zns:existing",
             "public_key": "ed25519:AAAA",
             "private_key": "BBBB",
             "name": "N",
@@ -138,7 +138,7 @@ class TestLoadOrCreate:
 
         agent_config = AgentConfig(name="N", description="D")
         result = ConfigManager.load_or_create(agent_config)
-        assert result["agent_id"] == "agdns:existing"
+        assert result["agent_id"] == "zns:existing"
 
     def test_raises_without_name(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

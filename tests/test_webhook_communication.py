@@ -187,7 +187,7 @@ class TestSendMessage:
     def test_send_fails_when_no_target(self, manager):
         manager.target_webhook_url = None
         result = manager.send_message("test")
-        assert "No target agent" in result
+        assert "No target entity" in result
 
     @patch("zyndai_agent.webhook_communication.requests.post")
     def test_send_handles_http_error(self, mock_post, manager):

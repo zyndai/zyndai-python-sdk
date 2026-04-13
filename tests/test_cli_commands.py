@@ -139,7 +139,7 @@ class TestKeysCommand:
         keys_run(argparse.Namespace(keys_action="list"))
         out = capsys.readouterr().out
         assert "developer" in out
-        assert "agdns:" in out
+        assert "zns:" in out
 
     def test_keys_create(self, tmp_zynd_home, capsys):
         from zynd_cli.commands.keys import run
