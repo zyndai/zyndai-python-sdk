@@ -134,7 +134,7 @@ class ZyndBase(
             base_url = self._get_base_url()
             card = build_runtime_card(self._static_card, base_url, self.keypair)
             if self._entity_type == "service":
-                card["type"] = "service"
+                card["entity_type"] = "service"
             return card
 
         self._build_card = _build_card

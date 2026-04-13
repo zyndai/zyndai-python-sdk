@@ -250,6 +250,12 @@ def _service_register(args: argparse.Namespace):
 
     service_name_zns = config.get("service_name", "")
 
+    # Auto-derive service_endpoint from webhook_port if not set
+    service_endpoint = config.get("service_endpoint")
+    if not service_endpoint:
+        port = config.get("webhook_port", 5000)
+        service_endpoint = f"http://localhost:{port}"
+
     # Check if already registered
     existing = get_agent(registry_url, kp.agent_id, entity_type="service")
     already_registered = existing is not None
@@ -281,7 +287,7 @@ def _service_register(args: argparse.Namespace):
                 registry_url=registry_url,
                 keypair=kp,
                 name=config["name"],
-                agent_url="",
+                agent_url=service_endpoint,
                 category=config.get("category", "general"),
                 tags=config.get("tags", []),
                 summary=config.get("summary", ""),
@@ -289,7 +295,7 @@ def _service_register(args: argparse.Namespace):
                 developer_proof=proof,
                 agent_name=service_name_zns,
                 entity_type="service",
-                service_endpoint=config.get("service_endpoint"),
+                service_endpoint=service_endpoint,
                 openapi_url=config.get("openapi_url"),
                 entity_pricing=config.get("entity_pricing"),
             )
