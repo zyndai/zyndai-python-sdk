@@ -1,4 +1,4 @@
-"""zynd agent — Agent project scaffolding, registration, and updates."""
+"""zynd agent — Agent project scaffolding and unified run."""
 
 import argparse
 import hashlib
@@ -14,20 +14,18 @@ from zyndai_agent.ed25519_identity import (
     derive_agent_keypair,
     create_derivation_proof,
     generate_developer_id,
-    sign as ed25519_sign,
 )
 from zyndai_agent.dns_registry import (
-    register_agent,
-    get_agent,
-    update_agent,
-    check_agent_name_available,
-    get_agent_fqan,
+    register_entity,
+    get_entity,
+    update_entity,
+    check_entity_name_available,
+    get_entity_fqan,
 )
 from zynd_cli.config import (
     developer_key_path,
     agents_dir,
     agent_dir,
-    agent_keypair_path,
     ensure_zynd_dir,
     get_registry_url,
 )
@@ -45,19 +43,13 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
     init_p.add_argument("--index", type=int, default=None, help="Derivation index (default: next available)")
     init_p.set_defaults(func=_agent_init)
 
-    # zynd agent register
-    reg_p = sub.add_parser("register", help="Register agent on the network")
-    reg_p.add_argument("--config", default="agent.config.json", help="Path to agent.config.json")
-    reg_p.add_argument("--agent-url", help="Override agent URL for registration")
-    reg_p.set_defaults(func=_agent_register)
-
-    # zynd agent update
-    upd_p = sub.add_parser("update", help="Push config & codebase changes to registry")
-    upd_p.add_argument("--config", default="agent.config.json", help="Path to agent.config.json")
-    upd_p.set_defaults(func=_agent_update)
-
     # zynd agent run
-    run_p = sub.add_parser("run", help="Run the agent from current directory")
+    run_p = sub.add_parser(
+        "run",
+        help="Start the agent, register/update it on the network, and keep running",
+    )
+    run_p.add_argument("--config", default="agent.config.json", help="Path to agent.config.json")
+    run_p.add_argument("--agent-url", help="Override agent URL for registration")
     run_p.add_argument("--port", type=int, help="Override webhook port")
     run_p.set_defaults(func=_agent_run)
 
@@ -65,13 +57,11 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
 
 
 def _agent_help(args: argparse.Namespace):
-    print("Usage: zynd agent {init,register,update,run}")
+    print("Usage: zynd agent {init,run}")
     print()
     print("Commands:")
-    print("  init       Create a new agent project (interactive wizard)")
-    print("  register   Register agent on the AgentDNS network")
-    print("  update     Push config & codebase changes to registry")
-    print("  run        Run the agent from current directory")
+    print("  init   Create a new agent project (interactive wizard)")
+    print("  run    Start the agent, register/update it on the network, and run")
 
 
 def _agent_init(args: argparse.Namespace):
@@ -113,7 +103,7 @@ def _agent_init(args: argparse.Namespace):
 
     console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Name: [bold]{name}[/bold]")
 
-    # 4. Derive agent keypair into ~/.zynd/agents/<agent_name>/keypair.json
+    # 4. Derive agent keypair into ~/.zynd/agents/<entity_name>/keypair.json
     ensure_zynd_dir()
     dev_kp = load_keypair(str(dev_key))
 
@@ -155,7 +145,7 @@ def _agent_init(args: argparse.Namespace):
         })
         console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Derived keypair at index {index}")
 
-    console.print(f"  [dim]Agent ID:[/dim]   {kp.agent_id}")
+    console.print(f"  [dim]Agent ID:[/dim]   {kp.entity_id}")
     console.print(f"  [dim]Public key:[/dim] {kp.public_key_string}")
 
     # 5. Check for existing files
@@ -166,21 +156,20 @@ def _agent_init(args: argparse.Namespace):
             console.print("  [dim]Aborted.[/dim]")
             return
 
-    # 5b. Derive agent_name (ZNS identifier) from the agent name
-    # Lowercase, replace spaces/underscores with hyphens, strip non-alphanumeric
+    # 5b. Derive entity_name (ZNS identifier) from the agent name
     import re
-    agent_name_zns = re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-").replace("_", "-"))
-    agent_name_zns = re.sub(r"-+", "-", agent_name_zns).strip("-")
-    if len(agent_name_zns) < 3:
-        agent_name_zns = agent_name_zns + "-agent"
+    entity_name_zns = re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-").replace("_", "-"))
+    entity_name_zns = re.sub(r"-+", "-", entity_name_zns).strip("-")
+    if len(entity_name_zns) < 3:
+        entity_name_zns = entity_name_zns + "-agent"
 
-    console.print(f"  [bold #8B5CF6]\u2713[/bold #8B5CF6] Agent name (ZNS): [bold]{agent_name_zns}[/bold]")
+    console.print(f"  [bold #8B5CF6]\u2713[/bold #8B5CF6] Agent name (ZNS): [bold]{entity_name_zns}[/bold]")
 
     # 6. Create agent.config.json
     registry_url = get_registry_url(getattr(args, "registry", None))
     config = {
         "name": name,
-        "agent_name": agent_name_zns,
+        "entity_name": entity_name_zns,
         "framework": framework,
         "description": f"{name} agent",
         "category": "general",
@@ -189,7 +178,7 @@ def _agent_init(args: argparse.Namespace):
         "webhook_port": 5000,
         "registry_url": registry_url,
         "keypair_path": str(kp_path),
-        "agent_index": index,
+        "entity_index": index,
     }
 
     with open("agent.config.json", "w") as f:
@@ -235,7 +224,7 @@ def _agent_init(args: argparse.Namespace):
     console.print()
     console.print(f"  [dim]Name[/dim]       {name}")
     console.print(f"  [dim]Framework[/dim]   {fw_info['label']}")
-    console.print(f"  [dim]Agent ID[/dim]    {kp.agent_id}")
+    console.print(f"  [dim]Agent ID[/dim]    {kp.entity_id}")
     console.print(f"  [dim]Keypair[/dim]     {kp_path}")
     console.print()
     console.print(f"  [bold]Next steps:[/bold]")
@@ -245,15 +234,12 @@ def _agent_init(args: argparse.Namespace):
     if fw_info.get("env_keys"):
         console.print(f"  [dim]{step}.[/dim] Add your API keys to [bold].env[/bold]")
         step += 1
-    console.print(f"  [dim]{step}.[/dim] Register your agent:")
-    console.print(f"     [bold #8B5CF6]zynd agent register[/bold #8B5CF6]")
-    step += 1
-    console.print(f"  [dim]{step}.[/dim] Run your agent:")
+    console.print(f"  [dim]{step}.[/dim] Run your agent (registers on first run, updates on subsequent runs):")
     console.print(f"     [bold #8B5CF6]zynd agent run[/bold #8B5CF6]")
 
 
-def _agent_register(args: argparse.Namespace):
-    """Start the agent, health-check it, register on registry, and keep running."""
+def _agent_run(args: argparse.Namespace):
+    """Start the agent, health-check it, upsert on the registry, and keep running."""
     import subprocess
     import time
     import requests as _req
@@ -278,11 +264,10 @@ def _agent_register(args: argparse.Namespace):
 
     kp = load_keypair(keypair_path)
     registry_url = get_registry_url(getattr(args, "registry", None)) or config.get("registry_url", "http://localhost:8080")
-    port = config.get("webhook_port", 5000)
-    agent_url = args.agent_url or config.get("agent_url", f"http://localhost:{port}")
+    port = args.port or config.get("webhook_port", 5000)
+    entity_url = args.entity_url or config.get("entity_url", f"http://localhost:{port}")
     health_url = f"http://localhost:{port}/health"
 
-    # Load developer key for proof
     dev_key = developer_key_path()
     if not dev_key.exists():
         print("Error: No developer keypair found.", file=sys.stderr)
@@ -290,9 +275,9 @@ def _agent_register(args: argparse.Namespace):
 
     dev_kp = load_keypair(str(dev_key))
     _, metadata = load_keypair_with_metadata(keypair_path)
-    derived_from = metadata.get("derived_from", {})
-    agent_index = derived_from.get("index", config.get("agent_index", 0))
-    proof = create_derivation_proof(dev_kp, kp.public_key, agent_index)
+    derived_from = (metadata or {}).get("derived_from", {})
+    entity_index = derived_from.get("index", config.get("entity_index", 0))
+    proof = create_derivation_proof(dev_kp, kp.public_key, entity_index)
     dev_id = generate_developer_id(dev_kp.public_key_bytes)
 
     from rich.console import Console
@@ -303,10 +288,10 @@ def _agent_register(args: argparse.Namespace):
     console.print(f"  [bold #8B5CF6]▶[/bold #8B5CF6] Starting [bold]{config.get('name', 'agent')}[/bold]...")
 
     env = os.environ.copy()
-    if keypair_path:
-        env["ZYND_AGENT_KEYPAIR_PATH"] = keypair_path
-    if registry_url:
-        env["ZYND_REGISTRY_URL"] = registry_url
+    env["ZYND_AGENT_KEYPAIR_PATH"] = keypair_path
+    env["ZYND_REGISTRY_URL"] = registry_url
+    if args.port:
+        env["ZYND_WEBHOOK_PORT"] = str(args.port)
 
     proc = subprocess.Popen(
         [sys.executable, "agent.py"],
@@ -318,7 +303,7 @@ def _agent_register(args: argparse.Namespace):
     # --- Step 2: Health-check (poll /health for up to 15s) ---
     console.print(f"  [dim]Waiting for agent to start (health: {health_url})...[/dim]")
     healthy = False
-    for i in range(30):
+    for _ in range(30):
         if proc.poll() is not None:
             console.print(f"  [bold red]✗[/bold red] Agent process exited with code {proc.returncode}")
             sys.exit(1)
@@ -339,72 +324,75 @@ def _agent_register(args: argparse.Namespace):
     console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent is healthy")
 
     # --- Step 3: Check name availability ---
-    agent_name_zns = config.get("agent_name")
-    if agent_name_zns:
+    entity_name_zns = config.get("entity_name")
+    if entity_name_zns:
         try:
             dev_resp = _req.get(f"{registry_url}/v1/developers/{dev_id}")
             if dev_resp.status_code == 200:
                 dev_handle = dev_resp.json().get("dev_handle", "")
                 if dev_handle:
-                    avail = check_agent_name_available(registry_url, dev_handle, agent_name_zns)
+                    avail = check_entity_name_available(registry_url, dev_handle, entity_name_zns)
                     if not avail.get("available", True):
-                        existing_id = avail.get("existing_agent_id", "")
-                        if existing_id and existing_id != kp.agent_id:
-                            console.print(f"  [bold red]✗[/bold red] Name '{agent_name_zns}' already taken by {existing_id}")
+                        existing_id = avail.get("existing_entity_id", "")
+                        if existing_id and existing_id != kp.entity_id:
+                            console.print(f"  [bold red]✗[/bold red] Name '{entity_name_zns}' already taken by {existing_id}")
                             proc.terminate()
                             sys.exit(1)
                     else:
-                        console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Name '{agent_name_zns}' is available")
+                        console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Name '{entity_name_zns}' is available")
                 else:
                     console.print(f"  [dim]Warning: No developer handle — name binding skipped[/dim]")
-                    agent_name_zns = None
+                    entity_name_zns = None
             elif dev_resp.status_code == 404:
                 console.print(f"  [dim]Warning: Developer not found on registry — name binding skipped[/dim]")
-                agent_name_zns = None
+                entity_name_zns = None
         except Exception as e:
             console.print(f"  [dim]Warning: Could not check name: {e}[/dim]")
 
-    # --- Step 4: Register or update on registry ---
-    existing = get_agent(registry_url, kp.agent_id)
+    # --- Step 4: Upsert on registry ---
+    existing = get_entity(registry_url, kp.entity_id)
 
     if existing is not None:
         console.print(f"  [dim]Agent already registered — updating...[/dim]")
+        codebase_hash = _compute_codebase_hash(".")
         update_body = {
             "name": config["name"],
-            "entity_url": agent_url,
+            "entity_url": entity_url,
             "category": config.get("category", "general"),
             "tags": config.get("tags", []),
             "summary": config.get("summary", ""),
+            "codebase_hash": codebase_hash,
         }
-        success = update_agent(registry_url, kp.agent_id, kp, update_body)
+        success = update_entity(registry_url, kp.entity_id, kp, update_body)
         if success:
-            fqan = get_agent_fqan(registry_url, kp.agent_id)
+            fqan = get_entity_fqan(registry_url, kp.entity_id)
             console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent updated on registry")
+            console.print(f"  [dim]Codebase hash:[/dim] {codebase_hash[:16]}...")
             if fqan:
                 console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
         else:
             console.print(f"  [bold red]✗[/bold red] Update failed")
     else:
         try:
-            agent_id = register_agent(
+            entity_id = register_entity(
                 registry_url=registry_url,
                 keypair=kp,
                 name=config["name"],
-                agent_url=agent_url,
+                entity_url=entity_url,
                 category=config.get("category", "general"),
                 tags=config.get("tags", []),
                 summary=config.get("summary", ""),
                 developer_id=dev_id,
                 developer_proof=proof,
-                agent_name=agent_name_zns,
+                entity_name=entity_name_zns,
                 entity_pricing=config.get("entity_pricing"),
             )
-            fqan = get_agent_fqan(registry_url, agent_id)
-            console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent registered: {agent_id}")
+            fqan = get_entity_fqan(registry_url, entity_id)
+            console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent registered: {entity_id}")
             if fqan:
                 console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
-            if agent_name_zns:
-                console.print(f"  [dim]ZNS Name:[/dim] {agent_name_zns}")
+            if entity_name_zns:
+                console.print(f"  [dim]ZNS Name:[/dim] {entity_name_zns}")
         except Exception as e:
             console.print(f"  [bold red]✗[/bold red] Registration failed: {e}")
 
@@ -423,78 +411,12 @@ def _agent_register(args: argparse.Namespace):
             proc.kill()
 
 
-def _agent_update(args: argparse.Namespace):
-    """Push config and codebase changes to the registry."""
-
-    config_path = args.config
-    if not os.path.exists(config_path):
-        print(f"Error: {config_path} not found.", file=sys.stderr)
-        print("Run 'zynd agent init' first.")
-        sys.exit(1)
-
-    with open(config_path, "r") as f:
-        config = json.load(f)
-
-    keypair_path = config.get("keypair_path")
-    if not keypair_path or not os.path.exists(keypair_path):
-        print(f"Error: Agent keypair not found at {keypair_path}", file=sys.stderr)
-        sys.exit(1)
-
-    kp = load_keypair(keypair_path)
-    registry_url = get_registry_url(getattr(args, "registry", None)) or config.get("registry_url", "http://localhost:8080")
-
-    from rich.console import Console
-    console = Console()
-
-    # Check if agent is registered
-    console.print(f"  [dim]Checking registry...[/dim]")
-    existing = get_agent(registry_url, kp.agent_id)
-    if not existing:
-        console.print(f"  [bold red]✗[/bold red] Agent not registered. Run 'zynd agent register' first.")
-        sys.exit(1)
-
-    # Compute codebase hash (SHA-256 of all source files in current directory)
-    console.print(f"  [dim]Computing codebase hash...[/dim]")
-    codebase_hash = _compute_codebase_hash(".")
-    console.print(f"  [dim]Hash:[/dim] {codebase_hash[:16]}...")
-
-    # Build update payload from config
-    agent_url = config.get("agent_url", f"http://localhost:{config.get('webhook_port', 5000)}")
-
-    # Build update body — all mutable fields from agent.config.json
-    update_body = {
-        "name": config.get("name", ""),
-        "entity_url": agent_url,
-        "category": config.get("category", "general"),
-        "tags": config.get("tags", []),
-        "summary": config.get("summary", ""),
-        "codebase_hash": codebase_hash,
-    }
-
-    # Push to registry (update_agent handles signing + auth)
-    console.print(f"  [dim]Pushing update to registry...[/dim]")
-    success = update_agent(registry_url, kp.agent_id, kp, update_body)
-
-    if success:
-        console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent updated on registry")
-        console.print(f"  [dim]Agent ID:[/dim]      {kp.agent_id}")
-        console.print(f"  [dim]Name:[/dim]          {config.get('name', '')}")
-        console.print(f"  [dim]Entity URL:[/dim]    {agent_url}")
-        console.print(f"  [dim]Category:[/dim]      {config.get('category', 'general')}")
-        console.print(f"  [dim]Tags:[/dim]          {', '.join(config.get('tags', []))}")
-        console.print(f"  [dim]Codebase hash:[/dim] {codebase_hash[:16]}...")
-    else:
-        console.print(f"  [bold red]✗[/bold red] Update failed")
-        sys.exit(1)
-
-
 def _compute_codebase_hash(root_dir: str) -> str:
     """Compute SHA-256 hash of all source files in the agent's directory.
 
-    Includes: .py, .json (except agent.config.json), .toml, .yaml, .yml, .txt
+    Includes: .py, .json (except agent.config.json), .toml, .yaml, .yml, .txt, .md, .cfg
     Excludes: .env, __pycache__, .git, node_modules, .well-known, .agent*
     """
-    hasher = hashlib.sha256()
     root = Path(root_dir).resolve()
 
     skip_dirs = {"__pycache__", ".git", "node_modules", ".well-known", ".venv", "venv", ".agent"}
@@ -503,17 +425,13 @@ def _compute_codebase_hash(root_dir: str) -> str:
 
     file_hashes = []
     for dirpath, dirnames, filenames in os.walk(root):
-        # Skip hidden dirs and excluded dirs
         dirnames[:] = [d for d in dirnames if d not in skip_dirs and not d.startswith(".agent")]
 
         rel_dir = Path(dirpath).relative_to(root)
         for fname in sorted(filenames):
-            if fname in skip_files:
+            if fname in skip_files or fname.startswith("."):
                 continue
-            if fname.startswith("."):
-                continue
-            ext = Path(fname).suffix.lower()
-            if ext not in source_exts:
+            if Path(fname).suffix.lower() not in source_exts:
                 continue
 
             fpath = Path(dirpath) / fname
@@ -525,61 +443,9 @@ def _compute_codebase_hash(root_dir: str) -> str:
             except (OSError, PermissionError):
                 continue
 
-    # Sort for deterministic order, then hash the combined list
     file_hashes.sort()
     combined = "\n".join(file_hashes).encode()
     return hashlib.sha256(combined).hexdigest()
-
-
-
-
-def _agent_run(args: argparse.Namespace):
-    """Run the agent from the current directory using agent.config.json."""
-    import subprocess
-
-    config_file = "agent.config.json"
-    if not os.path.exists(config_file):
-        print("Error: agent.config.json not found in current directory.", file=sys.stderr)
-        print("Make sure you're in the agent's root directory, or run 'zynd agent init' first.")
-        sys.exit(1)
-
-    if not os.path.exists("agent.py"):
-        print("Error: agent.py not found in current directory.", file=sys.stderr)
-        sys.exit(1)
-
-    with open(config_file) as f:
-        config = json.load(f)
-
-    # Override port if specified
-    port = getattr(args, "port", None)
-    if port:
-        os.environ["ZYND_WEBHOOK_PORT"] = str(port)
-
-    # Ensure keypair path is set in env
-    keypair_path = config.get("keypair_path", "")
-    if keypair_path and not os.environ.get("ZYND_AGENT_KEYPAIR_PATH"):
-        os.environ["ZYND_AGENT_KEYPAIR_PATH"] = keypair_path
-
-    # Ensure registry URL is set
-    registry_url = config.get("registry_url", "")
-    if registry_url and not os.environ.get("ZYND_REGISTRY_URL"):
-        os.environ["ZYND_REGISTRY_URL"] = registry_url
-
-    from rich.console import Console
-    console = Console()
-    console.print()
-    console.print(f"  [bold #8B5CF6]▶[/bold #8B5CF6] Running [bold]{config.get('name', 'agent')}[/bold] ({config.get('framework', 'custom')})")
-    console.print(f"  [dim]Keypair:[/dim] {keypair_path}")
-    console.print(f"  [dim]Registry:[/dim] {registry_url}")
-    console.print()
-
-    try:
-        subprocess.run([sys.executable, "agent.py"], check=True)
-    except KeyboardInterrupt:
-        console.print("\n  [dim]Agent stopped.[/dim]")
-    except subprocess.CalledProcessError as e:
-        print(f"Agent exited with code {e.returncode}", file=sys.stderr)
-        sys.exit(e.returncode)
 
 
 def _write_file(path: str, content: str):

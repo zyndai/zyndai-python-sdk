@@ -1,7 +1,6 @@
-"""zynd service — Service project scaffolding, registration, and updates."""
+"""zynd service — Service project scaffolding and unified run."""
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -15,15 +14,12 @@ from zyndai_agent.ed25519_identity import (
     derive_agent_keypair,
     create_derivation_proof,
     generate_developer_id,
-    generate_service_id,
-    sign as ed25519_sign,
-)
+    )
 from zyndai_agent.dns_registry import (
-    register_agent,
-    get_agent,
-    update_agent,
-    check_agent_name_available,
-    get_agent_fqan,
+    register_entity,
+    get_entity,
+    update_entity,
+    get_entity_fqan,
 )
 from zynd_cli.config import (
     developer_key_path,
@@ -47,22 +43,14 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
     init_p.add_argument("--index", type=int, default=None, help="Derivation index")
     init_p.set_defaults(func=_service_init)
 
-    # zynd service register
-    reg_p = sub.add_parser("register", help="Register service on the network")
-    reg_p.add_argument(
-        "--config", default="service.config.json", help="Path to service.config.json"
-    )
-    reg_p.set_defaults(func=_service_register)
-
-    # zynd service update
-    upd_p = sub.add_parser("update", help="Push config changes to registry")
-    upd_p.add_argument(
-        "--config", default="service.config.json", help="Path to service.config.json"
-    )
-    upd_p.set_defaults(func=_service_update)
-
     # zynd service run
-    run_p = sub.add_parser("run", help="Run the service from current directory")
+    run_p = sub.add_parser(
+        "run",
+        help="Start the service, register/update it on the network, and keep running",
+    )
+    run_p.add_argument(
+        "--config", default="service.config.json", help="Path to service.config.json"
+    )
     run_p.add_argument("--port", type=int, help="Override webhook port")
     run_p.set_defaults(func=_service_run)
 
@@ -70,11 +58,9 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
 
 
 def _service_help(args):
-    print("Usage: zynd service {init,register,update,run}")
-    print("  init      Create a new service project")
-    print("  register  Register service on the network")
-    print("  update    Push config changes to registry")
-    print("  run       Run the service")
+    print("Usage: zynd service {init,run}")
+    print("  init   Create a new service project")
+    print("  run    Start the service, register/update it on the network, and run")
 
 
 def _to_zns_name(name: str) -> str:
@@ -125,7 +111,7 @@ def _service_init(args: argparse.Namespace):
 
     # Derive keypair
     svc_kp = derive_agent_keypair(dev_kp.private_key, index)
-    svc_id = generate_service_id(svc_kp.public_key_bytes)
+    svc_id = generate_entity_id(svc_kp.public_key_bytes, "service")
 
     # Store keypair
     svc_safe = name.lower().replace(" ", "-")
@@ -168,7 +154,7 @@ def _service_init(args: argparse.Namespace):
         "webhook_port": 5000,
         "registry_url": registry_url,
         "keypair_path": str(kp_path),
-        "agent_index": index,
+        "entity_index": index,
     }
     with open("service.config.json", "w") as f:
         json.dump(config, f, indent=2)
@@ -214,12 +200,11 @@ def _service_init(args: argparse.Namespace):
     print(f"    Keypair:    {kp_path}")
     print(f"\n  Next steps:")
     print(f"    1. Edit service.py with your service logic")
-    print(f"    2. zynd service register")
-    print(f"    3. zynd service run")
+    print(f"    2. zynd service run   (registers on first run, updates on subsequent runs)")
 
 
-def _service_register(args: argparse.Namespace):
-    """Start the service, health-check it, register on registry, and keep running."""
+def _service_run(args: argparse.Namespace):
+    """Start the service, health-check it, upsert on the registry, and keep running."""
     import subprocess
     import time
     import requests as _req
@@ -243,14 +228,12 @@ def _service_register(args: argparse.Namespace):
         sys.exit(1)
 
     kp, meta = load_keypair_with_metadata(kp_path)
-    service_id = generate_service_id(kp.public_key_bytes)
-    registry_url = get_registry_url(getattr(args, "registry", None))
-    port = config.get("webhook_port", 5000)
+    service_id = generate_entity_id(kp.public_key_bytes, "service")
+    registry_url = get_registry_url(getattr(args, "registry", None)) or config.get("registry_url", "http://localhost:8080")
+    port = args.port or config.get("webhook_port", 5000)
     health_url = f"http://localhost:{port}/health"
 
-    service_endpoint = config.get("service_endpoint")
-    if not service_endpoint:
-        service_endpoint = f"http://localhost:{port}"
+    service_endpoint = config.get("service_endpoint") or f"http://localhost:{port}"
 
     dev_path = developer_key_path()
     if not dev_path.exists():
@@ -259,9 +242,9 @@ def _service_register(args: argparse.Namespace):
 
     dev_kp = load_keypair(str(dev_path))
     dev_id = generate_developer_id(dev_kp.public_key_bytes)
-    derived = meta.get("derived_from", {})
-    agent_index = derived.get("index", config.get("agent_index", 0))
-    proof = create_derivation_proof(dev_kp, kp.public_key, agent_index)
+    derived = (meta or {}).get("derived_from", {})
+    entity_index = derived.get("index", config.get("entity_index", 0))
+    proof = create_derivation_proof(dev_kp, kp.public_key, entity_index)
     service_name_zns = config.get("service_name", "")
 
     from rich.console import Console
@@ -272,10 +255,10 @@ def _service_register(args: argparse.Namespace):
     console.print(f"  [bold #8B5CF6]▶[/bold #8B5CF6] Starting [bold]{config.get('name', 'service')}[/bold]...")
 
     env = os.environ.copy()
-    if kp_path:
-        env["ZYND_SERVICE_KEYPAIR_PATH"] = kp_path
-    if registry_url:
-        env["ZYND_REGISTRY_URL"] = registry_url
+    env["ZYND_SERVICE_KEYPAIR_PATH"] = kp_path
+    env["ZYND_REGISTRY_URL"] = registry_url
+    if args.port:
+        env["ZYND_WEBHOOK_PORT"] = str(args.port)
 
     proc = subprocess.Popen(
         [sys.executable, script_file],
@@ -287,7 +270,7 @@ def _service_register(args: argparse.Namespace):
     # --- Step 2: Health-check ---
     console.print(f"  [dim]Waiting for service to start (health: {health_url})...[/dim]")
     healthy = False
-    for i in range(30):
+    for _ in range(30):
         if proc.poll() is not None:
             console.print(f"  [bold red]✗[/bold red] Service process exited with code {proc.returncode}")
             sys.exit(1)
@@ -307,8 +290,8 @@ def _service_register(args: argparse.Namespace):
 
     console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Service is healthy")
 
-    # --- Step 3: Register or update on registry ---
-    existing = get_agent(registry_url, service_id, entity_type="service")
+    # --- Step 3: Upsert on registry ---
+    existing = get_entity(registry_url, service_id, entity_type="service")
 
     if existing is not None:
         console.print(f"  [dim]Service already registered — updating...[/dim]")
@@ -318,11 +301,11 @@ def _service_register(args: argparse.Namespace):
             "tags": config.get("tags", []),
             "summary": config.get("summary", ""),
         }
-        success = update_agent(
+        success = update_entity(
             registry_url, service_id, kp, update_body, entity_type="service"
         )
         if success:
-            fqan = get_agent_fqan(registry_url, service_id)
+            fqan = get_entity_fqan(registry_url, service_id)
             console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Service updated on registry")
             if fqan:
                 console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
@@ -330,23 +313,23 @@ def _service_register(args: argparse.Namespace):
             console.print(f"  [bold red]✗[/bold red] Update failed")
     else:
         try:
-            service_id = register_agent(
+            service_id = register_entity(
                 registry_url=registry_url,
                 keypair=kp,
                 name=config["name"],
-                agent_url=service_endpoint,
+                entity_url=service_endpoint,
                 category=config.get("category", "general"),
                 tags=config.get("tags", []),
                 summary=config.get("summary", ""),
                 developer_id=dev_id,
                 developer_proof=proof,
-                agent_name=service_name_zns,
+                entity_name=service_name_zns,
                 entity_type="service",
                 service_endpoint=service_endpoint,
                 openapi_url=config.get("openapi_url"),
                 entity_pricing=config.get("entity_pricing"),
             )
-            fqan = get_agent_fqan(registry_url, service_id)
+            fqan = get_entity_fqan(registry_url, service_id)
             console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Service registered: {service_id}")
             if fqan:
                 console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
@@ -368,75 +351,3 @@ def _service_register(args: argparse.Namespace):
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
-
-
-def _service_update(args: argparse.Namespace):
-    """Push config changes to the registry."""
-    config_path = args.config
-    if not os.path.exists(config_path):
-        print(f"Error: {config_path} not found.", file=sys.stderr)
-        sys.exit(1)
-
-    with open(config_path) as f:
-        config = json.load(f)
-
-    registry_url = get_registry_url(getattr(args, "registry", None))
-    kp_path = config.get("keypair_path")
-    if not kp_path or not os.path.exists(kp_path):
-        print("Error: keypair_path not found.", file=sys.stderr)
-        sys.exit(1)
-
-    kp = load_keypair(kp_path)
-    svc_id = generate_service_id(kp.public_key_bytes)
-
-    update_body = {
-        "name": config["name"],
-        "category": config.get("category", "general"),
-        "tags": config.get("tags", []),
-        "summary": config.get("summary", ""),
-    }
-
-    print(f"Updating service on the network...")
-    success = update_agent(
-        registry_url, svc_id, kp, update_body, entity_type="service"
-    )
-    if success:
-        fqan = get_agent_fqan(registry_url, svc_id)
-        print(f"\n  Service updated!")
-        print(f"    Service ID: {svc_id}")
-        if fqan:
-            print(f"    FQAN:       {fqan}")
-    else:
-        print("Update failed.", file=sys.stderr)
-        sys.exit(1)
-
-
-def _service_run(args: argparse.Namespace):
-    """Run the service from current directory."""
-    import subprocess
-
-    if not os.path.exists("service.py"):
-        print("Error: service.py not found in current directory.", file=sys.stderr)
-        sys.exit(1)
-
-    config = {}
-    if os.path.exists("service.config.json"):
-        with open("service.config.json") as f:
-            config = json.load(f)
-
-    env = os.environ.copy()
-    kp_path = config.get("keypair_path")
-    if kp_path:
-        env["ZYND_SERVICE_KEYPAIR_PATH"] = kp_path
-    registry_url = config.get("registry_url")
-    if registry_url:
-        env["ZYND_REGISTRY_URL"] = registry_url
-
-    if args.port:
-        env["ZYND_WEBHOOK_PORT"] = str(args.port)
-
-    print(f"Starting service...")
-    try:
-        subprocess.run([sys.executable, "service.py"], env=env)
-    except KeyboardInterrupt:
-        print("\nService stopped.")

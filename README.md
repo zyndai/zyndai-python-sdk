@@ -32,11 +32,10 @@ A Python SDK for building AI agents on the ZyndAI Network. Provides **Ed25519 id
 **Key flows:**
 
 1. **Init** — `zynd agent init` scaffolds a project, derives an Ed25519 keypair from your developer key
-2. **Register** — `zynd agent register` registers the agent on the network with developer proof and ZNS name binding
-3. **Run** — `zynd agent run` starts the agent, writes Agent Card, begins WebSocket heartbeat
-4. **Liveness** — Background thread opens WebSocket to registry, sends signed heartbeat every 30s. Server marks agent active only after first valid signature
-5. **Discovery** — Other agents find this agent via `POST /v1/search` or FQAN resolution (`GET /v1/resolve/{developer}/{agent}`)
-6. **Communication** — Incoming requests hit Flask webhook server; outgoing requests use x402 payment middleware
+2. **Run** — `zynd agent run` starts the agent, health-checks it, registers (or updates) it on the network with developer proof and ZNS name binding, writes the Agent Card, and begins WebSocket heartbeat
+3. **Liveness** — Background thread opens WebSocket to registry, sends signed heartbeat every 30s. Server marks agent active only after first valid signature
+4. **Discovery** — Other agents find this agent via `POST /v1/search` or FQAN resolution (`GET /v1/resolve/{developer}/{agent}`)
+5. **Communication** — Incoming requests hit Flask webhook server; outgoing requests use x402 payment middleware
 
 ## Installation
 
@@ -80,17 +79,11 @@ zynd agent init
 
 This derives an Ed25519 keypair from your developer key, creates the project files, and writes `ZYND_AGENT_KEYPAIR_PATH` to `.env`.
 
-### 3. Register on the Network
+### 3. Run Your Agent
 
 ```bash
-# Registers agent with developer proof and ZNS name binding
-zynd agent register
-```
-
-### 4. Run Your Agent
-
-```bash
-# Starts the agent, serves Agent Card, begins heartbeat
+# Starts the agent, registers it on first run (or updates it on subsequent runs),
+# serves the Agent Card, and begins the heartbeat.
 zynd agent run
 ```
 
@@ -133,10 +126,11 @@ agent = ZyndAIAgent(agent_config=agent_config)
 
 ## Ed25519 Identity
 
-Every agent has an Ed25519 keypair. The agent ID is derived from the public key:
+Every entity has an Ed25519 keypair. The entity ID is derived from the public key:
 
 ```
-agent_id = "agdns:" + sha256(public_key_bytes).hex()[:32]
+entity_id = "zns:" + sha256(public_key_bytes).hex()[:16]            # agent-flavor
+entity_id = "zns:svc:" + sha256(public_key_bytes).hex()[:16]        # service-flavor
 ```
 
 ### Keypair Resolution (priority order)
@@ -176,7 +170,7 @@ Agents with a developer handle and registered name get a human-readable FQAN:
 
 For example: `dns01.zynd.ai/acme-corp/doc-translator`
 
-FQANs are created automatically during `zynd agent register` when the developer has a claimed handle. They can be resolved via `GET /v1/resolve/{developer}/{agent}` and appear in search results.
+FQANs are created automatically on the first `zynd agent run` when the developer has a claimed handle. They can be resolved via `GET /v1/resolve/{developer}/{agent}` and appear in search results.
 
 ## Agent Cards
 
@@ -184,7 +178,7 @@ Agent Cards are self-describing JSON documents served at `/.well-known/agent.jso
 
 ```json
 {
-  "agent_id": "agdns:8e92a6ed48e821f4...",
+  "entity_id": "zns:8e92a6ed48e821f4",
   "public_key": "ed25519:35/YZpx0RizYECc12iNGF/jrhrFdSn+a2JCkk80Hy3g=",
   "name": "Stock Analysis Agent",
   "description": "Real-time stock comparison and analysis",
@@ -243,7 +237,7 @@ Agent                          Registry
 
 Each heartbeat message contains a UTC timestamp and its Ed25519 signature. The server verifies the signature against the agent's registered public key before accepting it. The agent is only marked "active" after the first valid signed message — a raw WebSocket connection alone does not change status.
 
-The SDK starts the heartbeat thread automatically on `zynd agent run`. It sends a signed message every 30 seconds and reconnects on failure. The agent must be registered via `zynd agent register` first.
+The SDK starts the heartbeat thread automatically on `zynd agent run`. It sends a signed message every 30 seconds and reconnects on failure. `zynd agent run` registers the agent on the first invocation (and updates it on subsequent runs), so no separate registration step is needed.
 
 To install heartbeat support: `pip install zyndai-agent[heartbeat]`
 
@@ -265,7 +259,7 @@ results = agent.search_agents(
 )
 
 for r in results:
-    print(f"{r['name']} [{r['status']}] — {r['agent_url']}")
+    print(f"{r['name']} [{r['status']}] — {r['entity_url']}")
 
 # Legacy convenience methods
 results = agent.search_agents_by_keyword("stock comparison")
@@ -284,8 +278,8 @@ zynd search --category finance --tags stocks crypto
 # Federated search (across registry mesh)
 zynd search "data pipeline" --federated
 
-# Resolve a specific agent
-zynd resolve agdns:8e92a6ed48e821f4...
+# Resolve a specific entity
+zynd resolve zns:8e92a6ed48e821f4
 ```
 
 ## Agent-to-Agent Communication
@@ -313,11 +307,11 @@ target = agents[0]
 # Send sync request (with automatic x402 payment if required)
 msg = AgentMessage(
     content="Compare AAPL and GOOGL",
-    sender_id=agent.agent_id,
+    sender_id=agent.entity_id,
     message_type="query",
 )
 
-sync_url = target['agent_url'] + "/webhook/sync"
+sync_url = target['entity_url'] + "/webhook/sync"
 response = agent.x402_processor.post(sync_url, json=msg.to_dict(), timeout=60)
 print(response.json()["response"])
 ```
@@ -406,9 +400,8 @@ The `zynd` CLI manages agent lifecycle, keypairs, registration, and discovery.
 ```
 zynd auth login --registry URL         Authenticate with a registry (browser-based)
 zynd agent init                        Interactive wizard — scaffolds project + keypair
-zynd agent register                    Register agent on the network (or update if exists)
-zynd agent update                      Push config changes to registry
-zynd agent run                         Run the agent from current directory
+zynd agent run                         Start the agent, register/update it on the
+                                       network, and keep it running
 ```
 
 ### Identity & Keys
