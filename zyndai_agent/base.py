@@ -281,32 +281,65 @@ class ZyndBase(
     def _log_heartbeat_failure(self, exc: Exception, ws_url: str, diag_url: str):
         """Emit a detailed diagnostic when the WS heartbeat upgrade is rejected.
 
-        Extracts status code, response headers, and body from whichever
-        exception the `websockets` library raises (InvalidStatus in >=13,
-        InvalidStatusCode in <13), then falls back to a plain HTTPS GET on
-        the same path so we capture the server's actual error body — Gorilla's
-        upgrader writes a descriptive text body on 400.
+        By default emits a single compact line per failure that includes
+        the exception class, HTTP status (if known), and a short body
+        preview (first 100 chars, stripped). This is enough to tell the
+        operator what went wrong without burying their terminal in header
+        dumps every 5 seconds during a reconnect loop.
+
+        Set ZYND_HEARTBEAT_DEBUG=1 in the environment to get the full
+        verbose dump instead (status code + all response headers + full
+        body + a fallback plain-GET diagnostic on the same URL). Intended
+        for debugging weird upgrade failures where you need to see exactly
+        what the proxy / Gorilla upgrader is sending back.
         """
         exc_class = type(exc).__name__
-        _log_heartbeat(f"Connection lost [{exc_class}]: {exc} — reconnecting in 5s")
+        debug = os.environ.get("ZYND_HEARTBEAT_DEBUG", "").lower() in ("1", "true", "yes")
 
+        # Pull status + headers + body out of whichever exception shape the
+        # websockets library uses (InvalidStatus in >=13, InvalidStatusCode
+        # in <13). Both may be None if the failure was e.g. a network error.
         status_code = None
         resp_headers = None
         resp_body = None
 
-        # websockets >= 13: InvalidStatus has a .response attribute
         response = getattr(exc, "response", None)
         if response is not None:
             status_code = getattr(response, "status_code", None)
             resp_headers = getattr(response, "headers", None)
             resp_body = getattr(response, "body", None)
-
-        # websockets < 13: InvalidStatusCode has .status_code / .headers directly
         if status_code is None:
             status_code = getattr(exc, "status_code", None)
         if resp_headers is None:
             resp_headers = getattr(exc, "headers", None)
 
+        # Decode body to a string once for reuse in both the terse and
+        # verbose paths below.
+        body_str = ""
+        if resp_body:
+            try:
+                body_str = (
+                    resp_body.decode("utf-8", errors="replace")
+                    if isinstance(resp_body, (bytes, bytearray))
+                    else str(resp_body)
+                )
+            except Exception:
+                body_str = repr(resp_body)
+
+        if not debug:
+            # Terse single-line form. Examples:
+            #   ♥ Connection lost [InvalidStatus HTTP 404]: {"error":"entity not found"} — reconnecting in 5s
+            #   ♥ Connection lost [InvalidStatus HTTP 400]: Bad Request — reconnecting in 5s
+            #   ♥ Connection lost [ConnectionError]: [Errno 111] Connection refused — reconnecting in 5s
+            tag = exc_class
+            if status_code is not None:
+                tag = f"{exc_class} HTTP {status_code}"
+            detail = body_str.strip().replace("\n", " ")[:100] if body_str else str(exc)
+            _log_heartbeat(f"Connection lost [{tag}]: {detail} — reconnecting in 5s")
+            return
+
+        # Verbose form (ZYND_HEARTBEAT_DEBUG=1).
+        _log_heartbeat(f"Connection lost [{exc_class}]: {exc} — reconnecting in 5s")
         if status_code is not None:
             _log_heartbeat(f"  HTTP status: {status_code}")
         if resp_headers is not None:
@@ -319,21 +352,11 @@ class ZyndBase(
                     _log_heartbeat(f"  < {k}: {v}")
             except Exception:
                 _log_heartbeat(f"  (headers: {resp_headers!r})")
-        if resp_body:
-            try:
-                body_str = (
-                    resp_body.decode("utf-8", errors="replace")
-                    if isinstance(resp_body, (bytes, bytearray))
-                    else str(resp_body)
-                )
-                _log_heartbeat(f"  body: {body_str[:500]}")
-            except Exception:
-                _log_heartbeat(f"  (body: {resp_body!r})")
+        if body_str:
+            _log_heartbeat(f"  body: {body_str[:500]}")
 
-        # Fallback: plain GET on the same URL reveals Gorilla's upgrade error body.
-        # A non-WS GET to /v1/entities/{id}/ws returns:
-        #   - 404 "agent not found" if the store lookup fails (wrong ID format),
-        #   - 400 "Bad Request" with a websocket upgrade reason otherwise.
+        # Fallback plain GET on the same URL reveals Gorilla's upgrade
+        # error body when the websockets lib swallows it.
         try:
             import requests as _req
             _log_heartbeat(f"  diag GET {diag_url}")
