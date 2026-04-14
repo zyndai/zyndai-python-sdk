@@ -13,3 +13,6 @@ __pycache__
 .pytest_cache
 .ruff_cache
 .*
+
+# Local repowise index — not source of truth
+repowise.db
