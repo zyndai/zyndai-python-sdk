@@ -16,3 +16,10 @@ __pycache__
 
 # Local repowise index — not source of truth
 repowise.db
+
+# Local scratch projects under examples/http/ — these are per-developer
+# test beds, not source-of-truth examples. If we want shipped examples,
+# put them under examples/ with a README and remove them from this list.
+examples/http/job-scrapper/
+examples/http/dillu-persona/
+examples/http/linkedin-job-scraper/
