@@ -131,7 +131,7 @@ class AgentCommunicationManager:
 
     def __init__(
         self, 
-        agent_id: str,
+        entity_id: str,
         default_inbox_topic: Optional[str] = None,
         default_outbox_topic: Optional[str] = None,
         mqtt_broker_url: str = None,
@@ -144,15 +144,15 @@ class AgentCommunicationManager:
         Initialize the MQTT agent communication manager.
         
         Args:default_outbox_topic
-            agent_id: Unique identifier for this agent
+            entity_id: Unique identifier for this agent
             default_inbox_topic: Topic to subscribe to by default
             default_outbox_topic: Topic to publish to by default
             auto_reconnect: Whether to attempt reconnection on failure
             message_history_limit: Maximum number of messages to keep in history
         """
 
-        self.agent_id = agent_id
-        self.inbox_topic = default_inbox_topic or f"{agent_id}/inbox"
+        self.entity_id = entity_id
+        self.inbox_topic = default_inbox_topic or f"{entity_id}/inbox"
         self.outbox_topic = default_outbox_topic or f"agents/collaboration"
         self.auto_reconnect = auto_reconnect
         self.message_history_limit = message_history_limit
@@ -173,7 +173,7 @@ class AgentCommunicationManager:
 
         if mqtt is None:
             raise ImportError("paho-mqtt is required for MQTT communication. Install with: pip install zyndai-agent[mqtt]")
-        self.mqtt_client = mqtt.Client(client_id=self.agent_id)
+        self.mqtt_client = mqtt.Client(client_id=self.entity_id)
         self.mqtt_client.on_connect = self._handle_connect
         self.mqtt_client.on_message = self._handle_message
         self.mqtt_client.on_disconnect = self._handle_disconnect
@@ -181,9 +181,9 @@ class AgentCommunicationManager:
         self.default_mqtt_broker_url = mqtt_broker_url
 
         self.connect_to_broker(mqtt_broker_url)
-        self.subscribe_to_topic(f"{self.agent_id}/inbox")
+        self.subscribe_to_topic(f"{self.entity_id}/inbox")
         print("Agent connected to broker")
-        print(f"Subscribed to {self.agent_id}/inbox")
+        print(f"Subscribed to {self.entity_id}/inbox")
         
     
     def _handle_message(self, client, userdata, mqtt_message: MQTTMessage):
@@ -194,7 +194,7 @@ class AgentCommunicationManager:
             decrypt_payload = decrypt_message(payload, self.secret_seed, self.identity_credential)
             topic = mqtt_message.topic
             
-            logger.info(f"[{self.agent_id}] Received message on topic '{topic}'")
+            logger.info(f"[{self.entity_id}] Received message on topic '{topic}'")
             
             message = MQTTMessage.from_json(decrypt_payload)
 
@@ -239,17 +239,17 @@ class AgentCommunicationManager:
         """Handle successful connection to MQTT broker."""
         if rc == 0:
             self.is_connected = True
-            logger.info(f"[{self.agent_id}] Connected to MQTT broker successfully")
+            logger.info(f"[{self.entity_id}] Connected to MQTT broker successfully")
             
 
             self.subscribe_to_topic(self.inbox_topic)
-            logger.info(f"[{self.agent_id}] Listening for messages on {self.inbox_topic}")
+            logger.info(f"[{self.entity_id}] Listening for messages on {self.inbox_topic}")
             
 
             for topic in self.subscribed_topics:
                 if topic != self.inbox_topic:
                     client.subscribe(topic, qos=1)
-                    logger.info(f"[{self.agent_id}] Resubscribed to {topic}")
+                    logger.info(f"[{self.entity_id}] Resubscribed to {topic}")
         else:
             self.is_connected = False
             error_messages = {
@@ -260,20 +260,20 @@ class AgentCommunicationManager:
                 5: "Connection refused - not authorized"
             }
             error_msg = error_messages.get(rc, f"Unknown error (code {rc})")
-            logger.error(f"[{self.agent_id}] Failed to connect: {error_msg}")
+            logger.error(f"[{self.entity_id}] Failed to connect: {error_msg}")
 
     def _handle_disconnect(self, client, userdata, rc):
         """Handle disconnection from MQTT broker."""
         self.is_connected = False
-        logger.warning(f"[{self.agent_id}] Disconnected from MQTT broker, code {rc}")
+        logger.warning(f"[{self.entity_id}] Disconnected from MQTT broker, code {rc}")
         
 
         if self.auto_reconnect:
-            logger.info(f"[{self.agent_id}] Attempting to reconnect...")
+            logger.info(f"[{self.entity_id}] Attempting to reconnect...")
             try:
                 client.reconnect()
             except Exception as e:
-                logger.error(f"[{self.agent_id}] Reconnect failed: {e}")
+                logger.error(f"[{self.entity_id}] Reconnect failed: {e}")
 
     def connect_to_broker(self, broker_url: str) -> str:
         """
@@ -286,7 +286,7 @@ class AgentCommunicationManager:
             Status message about the connection attempt
         """
         if self.is_connected:
-            return f"Already connected to MQTT broker as '{self.agent_id}'"
+            return f"Already connected to MQTT broker as '{self.entity_id}'"
             
         try:
 
@@ -312,12 +312,12 @@ class AgentCommunicationManager:
                 time.sleep(0.1)
             
             if self.is_connected:
-                return f"Connected to MQTT broker at {host}:{port} as '{self.agent_id}'"
+                return f"Connected to MQTT broker at {host}:{port} as '{self.entity_id}'"
             else:
                 return f"Connection attempt to {host}:{port} timed out"
                 
         except Exception as e:
-            logger.error(f"[{self.agent_id}] Error connecting to MQTT broker: {e}")
+            logger.error(f"[{self.entity_id}] Error connecting to MQTT broker: {e}")
             return f"Failed to connect to MQTT broker: {str(e)}"
 
     def disconnect_from_broker(self) -> str:
@@ -335,10 +335,10 @@ class AgentCommunicationManager:
             self.mqtt_client.disconnect()
             self.is_connected = False
             self.received_messages.clear()
-            logger.info(f"[{self.agent_id}] Disconnected from MQTT broker")
+            logger.info(f"[{self.entity_id}] Disconnected from MQTT broker")
             return "Successfully disconnected from MQTT broker"
         except Exception as e:
-            logger.error(f"[{self.agent_id}] Error during disconnection: {e}")
+            logger.error(f"[{self.entity_id}] Error during disconnection: {e}")
             return f"Error during disconnection: {str(e)}"
 
     def send_message(self, message_content: str, message_type: str = "query", receiver_id: Optional[str] = None) -> str:
@@ -360,7 +360,7 @@ class AgentCommunicationManager:
             # Create a structured message
             message = MQTTMessage(
                 content=message_content,
-                sender_id=self.agent_id,
+                sender_id=self.entity_id,
                 receiver_id=receiver_id,
                 message_type=message_type,
                 sender_did=self.identity_credential
@@ -372,7 +372,7 @@ class AgentCommunicationManager:
             result = self.mqtt_client.publish(self.outbox_topic, encrypted_message, qos=1)
             
             if result.rc == 0:
-                logger.info(f"[{self.agent_id}] Message sent to '{self.outbox_topic}'")
+                logger.info(f"[{self.entity_id}] Message sent to '{self.outbox_topic}'")
                 
                 # Add to history
                 self.message_history.append({
@@ -389,12 +389,12 @@ class AgentCommunicationManager:
                 return f"Message sent successfully to topic '{self.outbox_topic}'"
             else:
                 error_msg = f"Failed to send message, error code: {result.rc}"
-                logger.error(f"[{self.agent_id}] {error_msg}")
+                logger.error(f"[{self.entity_id}] {error_msg}")
                 return error_msg
                 
         except Exception as e:
             error_msg = f"Error sending message: {str(e)}"
-            logger.error(f"[{self.agent_id}] {error_msg}")
+            logger.error(f"[{self.entity_id}] {error_msg}")
             return error_msg
 
     def read_messages(self) -> str:
@@ -449,12 +449,12 @@ class AgentCommunicationManager:
             result = self.mqtt_client.subscribe(topic_name, qos=1)
             if result[0] == 0:
                 self.subscribed_topics.add(topic_name)
-                logger.info(f"[{self.agent_id}] Subscribed to topic: {topic_name}")
+                logger.info(f"[{self.entity_id}] Subscribed to topic: {topic_name}")
                 return f"Successfully subscribed to topic '{topic_name}'"
             else:
                 return f"Failed to subscribe to topic '{topic_name}', error code: {result[0]}"
         except Exception as e:
-            logger.error(f"[{self.agent_id}] Error subscribing to topic: {e}")
+            logger.error(f"[{self.entity_id}] Error subscribing to topic: {e}")
             return f"Error subscribing to topic: {str(e)}"
     
     def unsubscribe_from_topic(self, topic_name: str) -> str:
@@ -479,12 +479,12 @@ class AgentCommunicationManager:
             if result[0] == 0:
                 if topic_name in self.subscribed_topics:
                     self.subscribed_topics.remove(topic_name)
-                logger.info(f"[{self.agent_id}] Unsubscribed from topic: {topic_name}")
+                logger.info(f"[{self.entity_id}] Unsubscribed from topic: {topic_name}")
                 return f"Successfully unsubscribed from topic '{topic_name}'"
             else:
                 return f"Failed to unsubscribe from topic '{topic_name}', error code: {result[0]}"
         except Exception as e:
-            logger.error(f"[{self.agent_id}] Error unsubscribing from topic: {e}")
+            logger.error(f"[{self.entity_id}] Error unsubscribing from topic: {e}")
             return f"Error unsubscribing from topic: {str(e)}"
     
     def change_outbox_topic(self, topic_name: str) -> str:
@@ -499,7 +499,7 @@ class AgentCommunicationManager:
         """
         previous_topic = self.outbox_topic
         self.outbox_topic = topic_name
-        logger.info(f"[{self.agent_id}] Changed outbox topic from '{previous_topic}' to '{topic_name}'")
+        logger.info(f"[{self.entity_id}] Changed outbox topic from '{previous_topic}' to '{topic_name}'")
         return f"Changed outbox topic to '{topic_name}'"
     
     def add_message_handler(self, handler_function: Callable) -> None:
@@ -511,7 +511,7 @@ class AgentCommunicationManager:
                               Should accept (message, topic) parameters
         """
         self.message_handlers.append(handler_function)
-        logger.info(f"[{self.agent_id}] Added custom message handler")
+        logger.info(f"[{self.entity_id}] Added custom message handler")
         
     def get_connection_status(self) -> Dict[str, Any]:
         """
@@ -521,7 +521,7 @@ class AgentCommunicationManager:
             Dictionary with connection information
         """
         return {
-            "agent_id": self.agent_id,
+            "entity_id": self.entity_id,
             "is_connected": self.is_connected,
             "inbox_topic": self.inbox_topic,
             "outbox_topic": self.outbox_topic,

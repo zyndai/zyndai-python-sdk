@@ -12,8 +12,8 @@ from zyndai_agent.ed25519_identity import (
     generate_developer_id,
     save_keypair,
 )
-from zyndai_agent.dns_registry import register_agent
-from zyndai_agent.agent_card_loader import load_agent_card, load_derivation_metadata
+from zyndai_agent.dns_registry import register_entity
+from zyndai_agent.entity_card_loader import load_entity_card, load_derivation_metadata
 from zynd_cli.config import (
     developer_key_path,
     agents_dir,
@@ -49,7 +49,7 @@ def run(args: argparse.Namespace):
     if not args.name:
         print("Error: --name is required (or use --card)", file=sys.stderr)
         sys.exit(1)
-    if not args.agent_url:
+    if not args.entity_url:
         print("Error: --agent-url is required (or use --card)", file=sys.stderr)
         sys.exit(1)
 
@@ -86,11 +86,11 @@ def run(args: argparse.Namespace):
     registry_url = get_registry_url(getattr(args, "registry", None))
 
     try:
-        agent_id = register_agent(
+        entity_id = register_entity(
             registry_url=registry_url,
             keypair=kp,
             name=args.name,
-            agent_url=args.agent_url,
+            entity_url=args.entity_url,
             category=args.category,
             tags=args.tags,
             summary=args.summary,
@@ -102,10 +102,10 @@ def run(args: argparse.Namespace):
         sys.exit(1)
 
     if args.output_json:
-        print(json.dumps({"agent_id": agent_id, "public_key": kp.public_key_string}))
+        print(json.dumps({"entity_id": entity_id, "public_key": kp.public_key_string}))
     else:
         print(f"Agent registered successfully!")
-        print(f"  Agent ID:   {agent_id}")
+        print(f"  Agent ID:   {entity_id}")
         print(f"  Public key: {kp.public_key_string}")
         print(f"  Registry:   {registry_url}")
 
@@ -121,7 +121,7 @@ def _next_agent_index() -> int:
 
 def _register_from_card(args: argparse.Namespace):
     """Register an agent from a .well-known/agent.json card file + keypair."""
-    card = load_agent_card(args.card)
+    card = load_entity_card(args.card)
 
     # Resolve keypair
     keypair_path = args.keypair or os.environ.get("ZYND_AGENT_KEYPAIR_PATH")
@@ -143,15 +143,15 @@ def _register_from_card(args: argparse.Namespace):
             developer_id = generate_developer_id(dev_kp.public_key_bytes)
 
     # Get agent URL from args or card
-    agent_url = args.agent_url
-    if not agent_url:
+    entity_url = args.entity_url
+    if not entity_url:
         server = card.get("server", {})
         host = server.get("host", "localhost")
         if host == "0.0.0.0":
             host = "localhost"
         port = server.get("port", 5000)
         scheme = "https" if port == 443 else "http"
-        agent_url = f"{scheme}://{host}:{port}"
+        entity_url = f"{scheme}://{host}:{port}"
 
     registry_url = get_registry_url(getattr(args, "registry", None))
 
@@ -161,11 +161,11 @@ def _register_from_card(args: argparse.Namespace):
         registry_url = card_registry["url"]
 
     try:
-        agent_id = register_agent(
+        entity_id = register_entity(
             registry_url=registry_url,
             keypair=kp,
             name=card.get("name", ""),
-            agent_url=agent_url,
+            entity_url=entity_url,
             category=args.category or card.get("category", "general"),
             tags=args.tags or card.get("tags"),
             summary=args.summary or card.get("summary"),
@@ -177,10 +177,10 @@ def _register_from_card(args: argparse.Namespace):
         sys.exit(1)
 
     if args.output_json:
-        print(json.dumps({"agent_id": agent_id, "public_key": kp.public_key_string}))
+        print(json.dumps({"entity_id": entity_id, "public_key": kp.public_key_string}))
     else:
         print(f"Agent registered successfully from card!")
-        print(f"  Agent ID:   {agent_id}")
+        print(f"  Agent ID:   {entity_id}")
         print(f"  Name:       {card.get('name', '?')}")
         print(f"  Public key: {kp.public_key_string}")
         print(f"  Registry:   {registry_url}")

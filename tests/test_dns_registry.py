@@ -15,20 +15,20 @@ class TestRegisterAgent:
         kp = generate_keypair()
         mock_response = MagicMock()
         mock_response.status_code = 201
-        mock_response.json.return_value = {"agent_id": kp.agent_id}
+        mock_response.json.return_value = {"entity_id": kp.entity_id}
         mock_post.return_value = mock_response
 
-        agent_id = dns_registry.register_agent(
+        entity_id = dns_registry.register_entity(
             registry_url="http://localhost:8080",
             keypair=kp,
             name="Test Agent",
-            agent_url="http://localhost:5000",
+            entity_url="http://localhost:5000",
             category="test",
             tags=["test"],
             summary="A test agent",
         )
 
-        assert agent_id == kp.agent_id
+        assert entity_id == kp.entity_id
         mock_post.assert_called_once()
 
         # Verify payload structure
@@ -48,11 +48,11 @@ class TestRegisterAgent:
         mock_post.return_value = mock_response
 
         with pytest.raises(RuntimeError, match="Failed to register"):
-            dns_registry.register_agent(
+            dns_registry.register_entity(
                 registry_url="http://localhost:8080",
                 keypair=kp,
                 name="Test",
-                agent_url="http://localhost:5000",
+                entity_url="http://localhost:5000",
             )
 
 
@@ -61,11 +61,11 @@ class TestGetAgent:
     def test_get_success(self, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"agent_id": "agdns:abc123", "name": "Test"}
+        mock_response.json.return_value = {"entity_id": "agdns:abc123", "name": "Test"}
         mock_get.return_value = mock_response
 
-        result = dns_registry.get_agent("http://localhost:8080", "agdns:abc123")
-        assert result["agent_id"] == "agdns:abc123"
+        result = dns_registry.get_entity("http://localhost:8080", "agdns:abc123")
+        assert result["entity_id"] == "agdns:abc123"
         mock_get.assert_called_once_with("http://localhost:8080/v1/entities/agdns:abc123")
 
     @patch("zyndai_agent.dns_registry.requests.get")
@@ -74,7 +74,7 @@ class TestGetAgent:
         mock_response.status_code = 404
         mock_get.return_value = mock_response
 
-        result = dns_registry.get_agent("http://localhost:8080", "agdns:notfound")
+        result = dns_registry.get_entity("http://localhost:8080", "agdns:notfound")
         assert result is None
 
 
@@ -84,13 +84,13 @@ class TestSearchAgents:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "results": [{"agent_id": "agdns:abc", "name": "Stock Agent"}],
+            "results": [{"entity_id": "agdns:abc", "name": "Stock Agent"}],
             "total_found": 1,
             "has_more": False,
         }
         mock_post.return_value = mock_response
 
-        result = dns_registry.search_agents(
+        result = dns_registry.search_entities(
             registry_url="http://localhost:8080",
             query="stock analysis",
         )
@@ -110,7 +110,7 @@ class TestSearchAgents:
         mock_response.json.return_value = {"results": [], "total_found": 0, "has_more": False}
         mock_post.return_value = mock_response
 
-        dns_registry.search_agents(
+        dns_registry.search_entities(
             registry_url="http://localhost:8080",
             query="nlp",
             category="ai",
@@ -135,7 +135,7 @@ class TestSearchAgents:
         mock_response.text = "Error"
         mock_post.return_value = mock_response
 
-        result = dns_registry.search_agents(
+        result = dns_registry.search_entities(
             registry_url="http://localhost:8080",
             query="test",
         )
@@ -147,7 +147,7 @@ class TestSearchAgents:
         import requests
         mock_post.side_effect = requests.RequestException("Connection refused")
 
-        result = dns_registry.search_agents(
+        result = dns_registry.search_entities(
             registry_url="http://localhost:8080",
             query="test",
         )
@@ -162,9 +162,9 @@ class TestUpdateAgent:
         mock_response.status_code = 200
         mock_put.return_value = mock_response
 
-        result = dns_registry.update_agent(
+        result = dns_registry.update_entity(
             "http://localhost:8080",
-            kp.agent_id,
+            kp.entity_id,
             kp,
             {"name": "Updated"},
         )
@@ -184,7 +184,7 @@ class TestDeleteAgent:
         mock_response.status_code = 204
         mock_delete.return_value = mock_response
 
-        result = dns_registry.delete_agent("http://localhost:8080", kp.agent_id, kp)
+        result = dns_registry.delete_entity("http://localhost:8080", kp.entity_id, kp)
         assert result is True
 
 
@@ -193,10 +193,10 @@ class TestGetAgentCard:
     def test_get_card_success(self, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"agent_id": "agdns:abc", "name": "Test"}
+        mock_response.json.return_value = {"entity_id": "agdns:abc", "name": "Test"}
         mock_get.return_value = mock_response
 
-        result = dns_registry.get_agent_card("http://localhost:8080", "agdns:abc")
+        result = dns_registry.get_entity_card("http://localhost:8080", "agdns:abc")
         assert result is not None
         mock_get.assert_called_once_with("http://localhost:8080/v1/entities/agdns:abc/card")
 
@@ -206,5 +206,5 @@ class TestGetAgentCard:
         mock_response.status_code = 404
         mock_get.return_value = mock_response
 
-        result = dns_registry.get_agent_card("http://localhost:8080", "agdns:notfound")
+        result = dns_registry.get_entity_card("http://localhost:8080", "agdns:notfound")
         assert result is None

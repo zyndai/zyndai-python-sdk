@@ -5,7 +5,7 @@ import json
 import os
 import sys
 
-from zyndai_agent.dns_registry import get_agent_card
+from zyndai_agent.dns_registry import get_entity_card
 from zyndai_agent.ed25519_identity import (
     load_keypair,
     save_keypair,
@@ -27,9 +27,9 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
     init_p = sub.add_parser("init", help="Set up agent keypair and .env for a new agent")
     init_p.add_argument("--index", type=int, default=None, help="Derivation index for agent keypair (default: next available)")
 
-    # zynd card show <agent_id>  (fetch from registry)
+    # zynd card show <entity_id>  (fetch from registry)
     show_p = sub.add_parser("show", help="Show an agent's Agent Card")
-    show_p.add_argument("agent_id", nargs="?", help="Agent ID (agdns:...)")
+    show_p.add_argument("entity_id", nargs="?", help="Agent ID (agdns:...)")
     show_p.add_argument("--file", help="Path to a local .well-known/agent.json file")
     show_p.add_argument("--json", dest="output_json", action="store_true", help="Output as JSON")
 
@@ -98,7 +98,7 @@ def _setup_agent_keypair(args: argparse.Namespace):
         # Already exists, reuse it
         kp = load_keypair(str(kp_path))
         print(f"Using existing keypair: {kp_path}")
-        print(f"  Agent ID:   {kp.agent_id}")
+        print(f"  Agent ID:   {kp.entity_id}")
         print(f"  Public key: {kp.public_key_string}")
         return kp_path
 
@@ -110,7 +110,7 @@ def _setup_agent_keypair(args: argparse.Namespace):
     })
 
     print(f"Derived keypair at index {index}: {kp_path}")
-    print(f"  Agent ID:   {kp.agent_id}")
+    print(f"  Agent ID:   {kp.entity_id}")
     print(f"  Public key: {kp.public_key_string}")
     return kp_path
 
@@ -151,15 +151,15 @@ def _card_show(args: argparse.Namespace):
             sys.exit(1)
         with open(args.file, "r") as f:
             card = json.load(f)
-    elif args.agent_id:
+    elif args.entity_id:
         # Fetch from registry
         registry_url = get_registry_url(getattr(args, "registry", None))
-        card = get_agent_card(registry_url, args.agent_id)
+        card = get_entity_card(registry_url, args.entity_id)
         if card is None:
-            print(f"Agent card not found: {args.agent_id}", file=sys.stderr)
+            print(f"Agent card not found: {args.entity_id}", file=sys.stderr)
             sys.exit(1)
     else:
-        print("Error: Provide an agent_id or --file path", file=sys.stderr)
+        print("Error: Provide an entity_id or --file path", file=sys.stderr)
         sys.exit(1)
 
     if getattr(args, "output_json", False):
@@ -167,9 +167,9 @@ def _card_show(args: argparse.Namespace):
         return
 
     print(f"Agent Card: {card.get('name', '?')}")
-    print(f"  ID:          {card.get('agent_id', '?')}")
+    print(f"  ID:          {card.get('entity_id', '?')}")
     print(f"  Description: {card.get('description', '?')}")
-    print(f"  URL:         {card.get('agent_url', '?')}")
+    print(f"  URL:         {card.get('entity_url', '?')}")
     print(f"  Version:     {card.get('version', '?')}")
     print(f"  Status:      {card.get('status', '?')}")
     print(f"  Public key:  {card.get('public_key', '?')}")

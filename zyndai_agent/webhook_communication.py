@@ -31,7 +31,7 @@ class WebhookCommunicationManager:
 
     def __init__(
         self,
-        agent_id: str,
+        entity_id: str,
         webhook_host: str = "0.0.0.0",
         webhook_port: int = 5000,
         webhook_url: Optional[str] = None,
@@ -49,7 +49,7 @@ class WebhookCommunicationManager:
         Initialize the webhook agent communication manager.
 
         Args:
-            agent_id: Unique identifier for this agent
+            entity_id: Unique identifier for this agent
             webhook_host: Host address to bind the webhook server (default: 0.0.0.0)
             webhook_port: Port number for the webhook server (default: 5000)
             webhook_url: Public webhook URL (auto-generated if None)
@@ -60,7 +60,7 @@ class WebhookCommunicationManager:
             agent_card_builder: Callable that returns a signed Agent Card dict
         """
 
-        self.agent_id = agent_id
+        self.entity_id = entity_id
         self.webhook_host = webhook_host
         self.webhook_port = webhook_port
         self.webhook_url = webhook_url
@@ -86,7 +86,7 @@ class WebhookCommunicationManager:
         self._lock = threading.Lock()
 
         # Create Flask app
-        self.flask_app = Flask(f"entity_{agent_id}")
+        self.flask_app = Flask(f"entity_{entity_id}")
         self.flask_app.logger.setLevel(logging.ERROR)  # Suppress Flask logging
 
         if price is not None and pay_to_address is not None:
@@ -151,7 +151,7 @@ class WebhookCommunicationManager:
         @self.flask_app.route("/health", methods=["GET"])
         def health_check():
             return jsonify(
-                {"status": "ok", "agent_id": self.agent_id, "timestamp": time.time()}
+                {"status": "ok", "entity_id": self.entity_id, "timestamp": time.time()}
             ), 200
 
         # Agent Card route for agent-dns
@@ -175,7 +175,7 @@ class WebhookCommunicationManager:
             # Parse message from dict (request.get_json() returns a dict, not a string)
             message = AgentMessage.from_dict(payload)
 
-            logger.info(f"[{self.agent_id}] Received message from {message.sender_id}")
+            logger.info(f"[{self.entity_id}] Received message from {message.sender_id}")
 
             # Auto-connect to sender if not connected
             if not self.is_agent_connected:
@@ -282,7 +282,7 @@ class WebhookCommunicationManager:
                     )
 
                 self.flask_thread = threading.Thread(
-                    target=run_flask, daemon=True, name=f"WebhookServer-{self.agent_id}"
+                    target=run_flask, daemon=True, name=f"WebhookServer-{self.entity_id}"
                 )
                 self.flask_thread.start()
 
@@ -331,12 +331,12 @@ class WebhookCommunicationManager:
                 from pyngrok import ngrok
 
                 ngrok.disconnect(self.ngrok_tunnel.public_url)
-                logger.info(f"[{self.agent_id}] Ngrok tunnel closed")
+                logger.info(f"[{self.entity_id}] Ngrok tunnel closed")
             except Exception as e:
                 logger.warning(f"Failed to close ngrok tunnel: {e}")
 
         self.is_running = False
-        logger.info(f"[{self.agent_id}] Webhook server stopped")
+        logger.info(f"[{self.entity_id}] Webhook server stopped")
 
     def _start_ngrok_tunnel(self):
         """Create an ngrok tunnel to expose the local webhook server publicly."""
@@ -361,7 +361,7 @@ class WebhookCommunicationManager:
             self.webhook_url = f"{public_url}/webhook"
 
             logger.info(
-                f"[{self.agent_id}] Ngrok tunnel created: {public_url} -> localhost:{self.webhook_port}"
+                f"[{self.entity_id}] Ngrok tunnel created: {public_url} -> localhost:{self.webhook_port}"
             )
             print(f"Ngrok tunnel active: {public_url} -> localhost:{self.webhook_port}")
 
@@ -400,7 +400,7 @@ class WebhookCommunicationManager:
             # Create structured message
             message = AgentMessage(
                 content=message_content,
-                sender_id=self.agent_id,
+                sender_id=self.entity_id,
                 receiver_id=receiver_id,
                 message_type=message_type,
                 sender_did=self.identity_credential,
@@ -458,7 +458,7 @@ class WebhookCommunicationManager:
             return error_msg
         except Exception as e:
             error_msg = f"Error sending message: {str(e)}"
-            logger.error(f"[{self.agent_id}] {error_msg}")
+            logger.error(f"[{self.entity_id}] {error_msg}")
             return error_msg
 
     def read_messages(self) -> str:
@@ -505,7 +505,7 @@ class WebhookCommunicationManager:
         """
         with self._lock:
             self.message_handlers.append(handler_function)
-        logger.info(f"[{self.agent_id}] Added custom message handler")
+        logger.info(f"[{self.entity_id}] Added custom message handler")
 
     def register_handler(self, handler_fn: Callable[[AgentMessage, str], None]):
         """Alias for add_message_handler for backward compatibility."""
@@ -521,12 +521,12 @@ class WebhookCommunicationManager:
         """
         with self._lock:
             self.pending_responses[message_id] = response
-        logger.info(f"[{self.agent_id}] Set response for message {message_id}")
+        logger.info(f"[{self.entity_id}] Set response for message {message_id}")
 
     def get_connection_status(self) -> Dict[str, Any]:
         """Get the current webhook server status and statistics."""
         return {
-            "agent_id": self.agent_id,
+            "entity_id": self.entity_id,
             "is_running": self.is_running,
             "webhook_url": self.webhook_url,
             "webhook_port": self.webhook_port,
@@ -552,18 +552,18 @@ class WebhookCommunicationManager:
         """
         Connect to another agent.
 
-        Supports both new agent-dns format (agent_url + Agent Card) and
+        Supports both new agent-dns format (entity_url + Agent Card) and
         legacy format (httpWebhookUrl).
 
         Args:
             agent: Agent search response dict
         """
-        # New agent-dns format: use agent_url to fetch Agent Card
-        agent_url = agent.get("agent_url")
-        if agent_url:
+        # New agent-dns format: use entity_url to fetch Agent Card
+        entity_url = agent.get("entity_url")
+        if entity_url:
             # Try to fetch Agent Card to get invoke endpoint
             try:
-                card_url = f"{agent_url.rstrip('/')}/.well-known/agent.json"
+                card_url = f"{entity_url.rstrip('/')}/.well-known/agent.json"
                 resp = requests.get(card_url, timeout=10)
                 if resp.status_code == 200:
                     card = resp.json()
@@ -573,15 +573,15 @@ class WebhookCommunicationManager:
                         self.target_webhook_url = invoke_url
                         self.is_agent_connected = True
                         logger.info(
-                            f"Connected to entity {agent.get('agent_id', agent.get('name', 'unknown'))} "
+                            f"Connected to entity {agent.get('entity_id', agent.get('name', 'unknown'))} "
                             f"via Card at {self.target_webhook_url}"
                         )
                         return
             except Exception as e:
-                logger.warning(f"Could not fetch Agent Card from {agent_url}: {e}")
+                logger.warning(f"Could not fetch Agent Card from {entity_url}: {e}")
 
-            # Fallback: use agent_url/webhook/sync directly
-            self.target_webhook_url = f"{agent_url.rstrip('/')}/webhook/sync"
+            # Fallback: use entity_url/webhook/sync directly
+            self.target_webhook_url = f"{entity_url.rstrip('/')}/webhook/sync"
             self.is_agent_connected = True
             logger.info(
                 f"Connected to entity at {self.target_webhook_url} (direct, no card)"
@@ -594,10 +594,10 @@ class WebhookCommunicationManager:
             self.target_webhook_url = webhook_url
             self.is_agent_connected = True
             logger.info(
-                f"Connected to agent {agent.get('didIdentifier', agent.get('agent_id', 'unknown'))} at {self.target_webhook_url}"
+                f"Connected to agent {agent.get('didIdentifier', agent.get('entity_id', 'unknown'))} at {self.target_webhook_url}"
             )
             return
 
         raise ValueError(
-            "Agent does not have agent_url or httpWebhookUrl. Cannot connect via webhook."
+            "Agent does not have entity_url or httpWebhookUrl. Cannot connect via webhook."
         )

@@ -15,7 +15,7 @@ if __name__ == "__main__":
 
     """
     default_outbox_topic:
-        <agent_id>/inbox is used to connect to other agents topic and communicate with it
+        <entity_id>/inbox is used to connect to other agents topic and communicate with it
     auto_reconnect:
         auto run the connection logic if disconnection happens
     message_history:

@@ -31,11 +31,11 @@ def build_endpoints(base_url: str) -> dict:
     }
 
 
-def build_agent_card(
-    agent_id: str,
+def build_entity_card(
+    entity_id: str,
     name: str,
     description: str,
-    agent_url: str,
+    entity_url: str,
     keypair: Ed25519Keypair,
     capabilities: Optional[dict] = None,
     price: Optional[str] = None,
@@ -45,10 +45,10 @@ def build_agent_card(
     Build an Agent Card dict matching the AgentCard struct in agent-dns.
 
     Args:
-        agent_id: The agent's agdns: ID
+        entity_id: The agent's agdns: ID
         name: Agent display name
         description: Agent description
-        agent_url: Base URL where the agent is hosted
+        entity_url: Base URL where the agent is hosted
         keypair: Ed25519 keypair for the agent
         capabilities: Dict like {"ai": ["nlp"], "protocols": ["http"]}
         price: Price string like "$0.01"
@@ -74,9 +74,9 @@ def build_agent_card(
                 })
 
     # Build endpoints
-    # Strip trailing slash from agent_url
-    base_url = agent_url.rstrip("/")
-    # If agent_url already ends with /webhook, derive base from it
+    # Strip trailing slash from entity_url
+    base_url = entity_url.rstrip("/")
+    # If entity_url already ends with /webhook, derive base from it
     if base_url.endswith("/webhook"):
         base_url = base_url[: -len("/webhook")]
 
@@ -103,7 +103,7 @@ def build_agent_card(
     iso_now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
 
     card = {
-        "agent_id": agent_id,
+        "entity_id": entity_id,
         "name": name,
         "description": description,
         "public_key": keypair.public_key_string,
@@ -122,7 +122,7 @@ def build_agent_card(
     return card
 
 
-def sign_agent_card(card_dict: dict, keypair: Ed25519Keypair) -> dict:
+def sign_entity_card(card_dict: dict, keypair: Ed25519Keypair) -> dict:
     """
     Sign an Agent Card and set the 'signature' field.
     Matches card/fetch.go:110-134: sign canonical JSON without signature field.

@@ -20,13 +20,13 @@ from zyndai_agent.ed25519_identity import (
     load_keypair_with_metadata,
     sign,
 )
-from zyndai_agent.agent_card import sign_agent_card, build_endpoints
+from zyndai_agent.entity_card import sign_entity_card, build_endpoints
 
 
 CARD_HASH_FIELDS = ("name", "description", "capabilities", "category", "tags", "pricing", "summary")
 
 
-def load_agent_card(path: str) -> dict:
+def load_entity_card(path: str) -> dict:
     """
     Read and validate an agent card JSON file.
 
@@ -116,7 +116,7 @@ def build_runtime_card(
     """
     Merge a static card (from file) with runtime fields to produce a serveable card.
 
-    Adds: agent_id, public_key, endpoints, status, timestamps, signature.
+    Adds: entity_id, public_key, endpoints, status, timestamps, signature.
     Strips: server, registry sections (SDK-internal).
 
     Args:
@@ -131,8 +131,8 @@ def build_runtime_card(
 
     card = {}
 
-    # Add runtime identity fields
-    card["agent_id"] = keypair.agent_id
+    # Add runtime identity fields.
+    card["entity_id"] = keypair.entity_id
     card["public_key"] = keypair.public_key_string
 
     # Copy metadata fields from static card
@@ -154,7 +154,7 @@ def build_runtime_card(
     card["signed_at"] = now
 
     # Sign the card
-    return sign_agent_card(card, keypair)
+    return sign_entity_card(card, keypair)
 
 
 def compute_card_hash(card: dict) -> str:

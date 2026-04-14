@@ -20,9 +20,9 @@ class IdentityManager:
     def __init__(self, registry_url: str = None):
         self.registry_url = registry_url
 
-    def verify_agent_identity(self, public_key_b64: str, message: bytes, signature: str) -> bool:
+    def verify_entity_identity(self, public_key_b64: str, message: bytes, signature: str) -> bool:
         """
-        Verify an agent's identity by checking an Ed25519 signature.
+        Verify an entity's identity by checking an Ed25519 signature.
 
         Args:
             public_key_b64: Base64-encoded Ed25519 public key

@@ -5,7 +5,7 @@ import json
 import sys
 
 from zyndai_agent.ed25519_identity import load_keypair
-from zyndai_agent.dns_registry import delete_agent
+from zyndai_agent.dns_registry import delete_entity
 from zynd_cli.config import (
     get_registry_url,
     developer_key_path,
@@ -51,7 +51,7 @@ def run(args: argparse.Namespace):
             )
             sys.exit(1)
 
-    success = delete_agent(registry_url, args.entity_id, kp)
+    success = delete_entity(registry_url, args.entity_id, kp)
     if success:
         print(f"Entity deregistered: {args.entity_id}")
     else:
@@ -70,7 +70,7 @@ def _find_keypair_for_entity(entity_id: str):
             if f.suffix == ".json":
                 try:
                     kp = lk(str(f))
-                    if kp.agent_id == entity_id:
+                    if kp.entity_id == entity_id:
                         return kp
                 except Exception:
                     continue
@@ -81,7 +81,7 @@ def _find_keypair_for_entity(entity_id: str):
         for f in sorted(svc_dir.rglob("*.json")):
             try:
                 kp = lk(str(f))
-                if kp.agent_id == entity_id:
+                if kp.entity_id == entity_id:
                     return kp
             except Exception:
                 continue
@@ -91,7 +91,7 @@ def _find_keypair_for_entity(entity_id: str):
     if dev.exists():
         try:
             kp = lk(str(dev))
-            if kp.agent_id == entity_id:
+            if kp.entity_id == entity_id:
                 return kp
         except Exception:
             pass

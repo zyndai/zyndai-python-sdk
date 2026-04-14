@@ -10,7 +10,6 @@ from zyndai_agent.ed25519_identity import (
     keypair_from_private_bytes,
     load_keypair,
     save_keypair,
-    generate_agent_id,
     sign,
     verify,
     public_key_string,
@@ -56,7 +55,7 @@ class TestKeypairProperties:
 
     def test_agent_id_format(self):
         kp = generate_keypair()
-        aid = kp.agent_id
+        aid = kp.entity_id
         assert aid.startswith("zns:")
         hex_part = aid[len("zns:"):]
         assert len(hex_part) == 32  # 16 bytes = 32 hex chars
@@ -84,18 +83,18 @@ class TestSaveLoadKeypair:
 class TestGenerateAgentId:
     def test_deterministic(self):
         kp = generate_keypair()
-        id1 = generate_agent_id(kp.public_key_bytes)
-        id2 = generate_agent_id(kp.public_key_bytes)
+        id1 = generate_entity_id(kp.public_key_bytes, "agent")
+        id2 = generate_entity_id(kp.public_key_bytes, "agent")
         assert id1 == id2
 
     def test_different_keys_different_ids(self):
         kp1 = generate_keypair()
         kp2 = generate_keypair()
-        assert generate_agent_id(kp1.public_key_bytes) != generate_agent_id(kp2.public_key_bytes)
+        assert generate_entity_id(kp1.public_key_bytes, "agent") != generate_entity_id(kp2.public_key_bytes, "agent")
 
     def test_format(self):
         kp = generate_keypair()
-        aid = generate_agent_id(kp.public_key_bytes)
+        aid = generate_entity_id(kp.public_key_bytes, "agent")
         assert aid.startswith("zns:")
         assert len(aid) == 4 + 32  # "zns:" + 32 hex chars
 
@@ -187,5 +186,5 @@ class TestDerivationProof:
         agent_kp = derive_agent_keypair(dev_kp.private_key, 5)
 
         proof = create_derivation_proof(dev_kp, agent_kp.public_key, 5)
-        proof["agent_index"] = 99  # Tamper
+        proof["entity_index"] = 99  # Tamper
         assert verify_derivation_proof(proof, agent_kp.public_key_b64) is False

@@ -16,13 +16,13 @@ logger = logging.getLogger("SearchAndDiscovery")
 
 class AgentSearchResponse(TypedDict):
     """Search result from agent-dns registry."""
-    agent_id: str
+    entity_id: str
     name: str
     summary: str
     category: str
     tags: list
     capability_summary: Optional[dict]
-    agent_url: str
+    entity_url: str
     home_registry: str
     score: float
     score_breakdown: Optional[dict]
@@ -42,7 +42,7 @@ class SearchAndDiscoveryManager:
         self.agents = []
         self.registry_url = registry_url
 
-    def search_agents(
+    def search_entities(
         self,
         keyword: Optional[str] = None,
         category: Optional[str] = None,
@@ -77,7 +77,7 @@ class SearchAndDiscoveryManager:
         """
         logger.info(f"Searching agents with query='{keyword}', skills={skills}")
 
-        result = dns_registry.search_agents(
+        result = dns_registry.search_entities(
             registry_url=self.registry_url,
             query=keyword,
             category=category,
@@ -119,7 +119,7 @@ class SearchAndDiscoveryManager:
         keyword = " ".join(capabilities) if capabilities else None
         limit = top_k if top_k is not None else 10
 
-        return self.search_agents(
+        return self.search_entities(
             keyword=keyword,
             skills=capabilities if capabilities else None,
             limit=limit,
@@ -140,28 +140,28 @@ class SearchAndDiscoveryManager:
         Returns:
             List of matching agents
         """
-        return self.search_agents(keyword=keyword, limit=limit)
+        return self.search_entities(keyword=keyword, limit=limit)
 
-    def get_agent_by_id(self, agent_id: str) -> Optional[AgentSearchResponse]:
+    def get_agent_by_id(self, entity_id: str) -> Optional[AgentSearchResponse]:
         """
         Get a specific agent by its ID.
 
         Args:
-            agent_id: The agent ID (agdns:... format)
+            entity_id: The agent ID (agdns:... format)
 
         Returns:
             Agent details or None if not found
         """
-        return dns_registry.get_agent(self.registry_url, agent_id)
+        return dns_registry.get_entity(self.registry_url, entity_id)
 
-    def get_agent_card(self, agent_id: str) -> Optional[dict]:
+    def get_entity_card(self, entity_id: str) -> Optional[dict]:
         """
         Fetch an agent's Agent Card.
 
         Args:
-            agent_id: The agent ID
+            entity_id: The agent ID
 
         Returns:
             Agent Card dict or None
         """
-        return dns_registry.get_agent_card(self.registry_url, agent_id)
+        return dns_registry.get_entity_card(self.registry_url, entity_id)

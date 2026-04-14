@@ -49,9 +49,9 @@ class TestWebSocketURLConstruction:
 
     def test_full_ws_endpoint(self):
         url = "http://localhost:8080"
-        agent_id = "agdns:test-agent-123"
+        entity_id = "agdns:test-agent-123"
         ws_url = url.replace("https://", "wss://").replace("http://", "ws://")
-        ws_url = f"{ws_url}/v1/entities/{agent_id}/ws"
+        ws_url = f"{ws_url}/v1/entities/{entity_id}/ws"
         assert ws_url == "ws://localhost:8080/v1/entities/agdns:test-agent-123/ws"
 
 
@@ -103,7 +103,7 @@ class TestHeartbeatWebSocketIntegration:
         agent = object.__new__(ZyndAIAgent)
         kp = generate_keypair()
         agent.keypair = kp
-        agent.agent_id = "agdns:heartbeat-test"
+        agent.entity_id = "agdns:heartbeat-test"
         agent._heartbeat_stop = threading.Event()
         agent._heartbeat_thread = None
 

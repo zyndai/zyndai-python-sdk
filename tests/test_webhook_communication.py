@@ -21,7 +21,7 @@ def manager():
     """Create a WebhookCommunicationManager with the server start mocked out."""
     with patch.object(WebhookCommunicationManager, "start_webhook_server"):
         mgr = WebhookCommunicationManager(
-            agent_id="test-agent",
+            entity_id="test-agent",
             webhook_host="0.0.0.0",
             webhook_port=15000,
             webhook_url="http://localhost:15000/webhook",
@@ -57,18 +57,18 @@ class TestWebhookRoutes:
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "ok"
-        assert data["agent_id"] == "test-agent"
+        assert data["entity_id"] == "test-agent"
 
     def test_agent_card_not_configured(self, client, manager):
         resp = client.get("/.well-known/agent.json")
         assert resp.status_code == 404
 
     def test_agent_card_configured(self, client, manager):
-        manager.agent_card_builder = lambda: {"agent_id": "agdns:test", "name": "Test"}
+        manager.agent_card_builder = lambda: {"entity_id": "agdns:test", "name": "Test"}
         resp = client.get("/.well-known/agent.json")
         assert resp.status_code == 200
         data = resp.get_json()
-        assert data["agent_id"] == "agdns:test"
+        assert data["entity_id"] == "agdns:test"
 
     def test_webhook_rejects_non_json(self, client):
         resp = client.post("/webhook", data="not json", content_type="text/plain")
@@ -112,10 +112,10 @@ class TestWebhookRoutes:
 
 class TestConnectAgent:
     def test_connect_with_agent_url(self, manager):
-        """New agent-dns format with agent_url."""
+        """New agent-dns format with entity_url."""
         agent = {
-            "agent_url": "http://remote:5000",
-            "agent_id": "agdns:remote",
+            "entity_url": "http://remote:5000",
+            "entity_id": "agdns:remote",
         }
         # Mock the card fetch to fail (fallback to direct URL)
         with patch("zyndai_agent.webhook_communication.requests.get") as mock_get:
@@ -128,8 +128,8 @@ class TestConnectAgent:
     def test_connect_with_agent_card(self, manager):
         """Connect via Agent Card fetch."""
         agent = {
-            "agent_url": "http://remote:5000",
-            "agent_id": "agdns:remote",
+            "entity_url": "http://remote:5000",
+            "entity_id": "agdns:remote",
         }
         with patch("zyndai_agent.webhook_communication.requests.get") as mock_get:
             mock_response = MagicMock()
@@ -159,7 +159,7 @@ class TestConnectAgent:
         assert manager.target_webhook_url == "http://legacy:5000/webhook"
 
     def test_connect_raises_without_url(self, manager):
-        with pytest.raises(ValueError, match="does not have agent_url or httpWebhookUrl"):
+        with pytest.raises(ValueError, match="does not have entity_url or httpWebhookUrl"):
             manager.connect_agent({"name": "No URL Agent"})
 
 
@@ -266,7 +266,7 @@ class TestMessageHandler:
 class TestConnectionStatus:
     def test_get_connection_status(self, manager):
         status = manager.get_connection_status()
-        assert status["agent_id"] == "test-agent"
+        assert status["entity_id"] == "test-agent"
         assert status["is_running"] is True
         assert status["webhook_url"] == "http://localhost:15000/webhook"
         assert status["webhook_port"] == 15000

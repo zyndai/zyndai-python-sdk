@@ -22,7 +22,7 @@ class TestAgentConfigDefaults:
         assert config.tags is None
         assert config.summary is None
         assert config.developer_keypair_path is None
-        assert config.agent_index is None
+        assert config.entity_index is None
         assert config.mqtt_broker_url is None
         assert config.default_outbox_topic is None
         assert config.price is None
