@@ -14,7 +14,8 @@ from zyndai_agent.ed25519_identity import (
     derive_agent_keypair,
     create_derivation_proof,
     generate_developer_id,
-    )
+    generate_entity_id,
+)
 from zyndai_agent.dns_registry import (
     register_entity,
     get_entity,
