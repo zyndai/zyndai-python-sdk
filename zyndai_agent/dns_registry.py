@@ -42,7 +42,17 @@ def register_entity(
     Returns:
         entity_id: The registered agent/service ID
     """
-    # Build signable payload (sorted keys to match Go's json.Marshal)
+    # Build signable payload. Must produce a byte sequence IDENTICAL to what
+    # the Go backend computes in handleRegisterEntity (server.go), which
+    # marshals a map[string]interface{} via json.Marshal:
+    #   - sort_keys=True           → Go json.Marshal sorts map keys alphabetically
+    #   - separators=(",", ":")    → Go json.Marshal has no whitespace
+    #   - ensure_ascii=False       → Go json.Marshal writes raw UTF-8 bytes
+    #                                for non-ASCII (em-dash, arrow, etc.);
+    #                                Python's default ensure_ascii=True would
+    #                                escape them to \uXXXX and produce a
+    #                                different byte sequence, leading to
+    #                                HTTP 401 "invalid agent signature".
     signable = {
         "entity_url": entity_url or "",
         "category": category,
@@ -54,8 +64,8 @@ def register_entity(
     if entity_type:
         signable["entity_type"] = entity_type
     signable_bytes = json.dumps(
-        signable, sort_keys=True, separators=(",", ":")
-    ).encode()
+        signable, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
     signature = sign(keypair.private_key, signable_bytes)
 
     # Build full registration request
@@ -194,12 +204,21 @@ def update_entity(
     body for the Authorization header.
     """
     label = entity_type or "entity"
-    # Sign the update content (excluding signature field itself)
-    signable_bytes = json.dumps(updates, sort_keys=True, separators=(",", ":")).encode()
+    # Canonical JSON encoding must match Go's json.Marshal default output
+    # byte-for-byte — see register_entity() above for the full rationale.
+    # The critical bit is ensure_ascii=False so non-ASCII chars (em-dash,
+    # arrow, emoji, etc.) in the update body serialize as raw UTF-8 and not
+    # as Python's default \uXXXX escapes, which would make the Go verifier
+    # compute a different signature and return HTTP 401.
+    signable_bytes = json.dumps(
+        updates, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
     updates["signature"] = sign(keypair.private_key, signable_bytes)
 
     # Serialize full body (with signature) and sign for auth header
-    body_bytes = json.dumps(updates, sort_keys=True, separators=(",", ":")).encode()
+    body_bytes = json.dumps(
+        updates, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
     auth_sig = sign(keypair.private_key, body_bytes)
 
     headers = {
