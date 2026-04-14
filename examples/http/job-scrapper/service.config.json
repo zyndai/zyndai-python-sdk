@@ -1,0 +1,31 @@
+{
+  "name": "linkedin-job-scraper",
+  "service_name": "svc:linkedin-job-scraper",
+  "description": "Scrapes public LinkedIn job postings by keyword and location. Returns structured JSON with title, company, location, salary range, description, posted date, and apply URL. Respects robots.txt and rate-limits at 1 req/s.",
+  "category": "data-extraction",
+  "tags": [
+    "linkedin",
+    "scraper",
+    "jobs",
+    "job-board",
+    "recruitment",
+    "web-scraping",
+    "data-extraction",
+    "structured-output"
+  ],
+  "summary": "LinkedIn job listing scraper — keyword + location → structured JSON (title, company, salary, apply URL)",
+  "service_endpoint": null,
+  "openapi_url": null,
+  "webhook_port": 5003,
+  "registry_url": "https://dns01.zynd.ai",
+  "keypair_path": "/Users/swapnilshinde/.zynd/services/linkedin-job-scraper/keypair.json",
+  "entity_index": 5,
+  "entity_pricing": {
+    "model": "per_request",
+    "base_price_usd": 0.01,
+    "currency": "USDC",
+    "payment_methods": [
+      "x402"
+    ]
+  }
+}

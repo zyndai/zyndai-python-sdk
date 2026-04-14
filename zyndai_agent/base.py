@@ -144,6 +144,23 @@ class ZyndBase(
 
         self._build_card = _build_card
 
+        # Derive the x402 runtime price string from structured entity_pricing
+        # if the operator only filled in the registry-facing field. Contract:
+        #   - If price is already set, use it verbatim (operator override wins).
+        #   - Else if entity_pricing has a positive base_price_usd, format it
+        #     as "${amount} {currency}" so WebhookCommunicationManager can
+        #     charge per call via x402.
+        #   - Else leave it unset (free service).
+        # This exists so users can specify pricing ONCE in config.json under
+        # entity_pricing and have both the registry registration AND runtime
+        # charging pick it up automatically.
+        runtime_price = config.price
+        if not runtime_price and config.entity_pricing:
+            base = config.entity_pricing.get("base_price_usd")
+            if isinstance(base, (int, float)) and base > 0:
+                currency = config.entity_pricing.get("currency") or "USDC"
+                runtime_price = f"${base} {currency}"
+
         # Start webhook server
         WebhookCommunicationManager.__init__(
             self,
@@ -156,7 +173,7 @@ class ZyndBase(
             identity_credential=None,
             keypair=self.keypair,
             agent_card_builder=_build_card,
-            price=config.price,
+            price=runtime_price,
             pay_to_address=self.pay_to_address,
             use_ngrok=config.use_ngrok,
             ngrok_auth_token=config.ngrok_auth_token or os.environ.get("NGROK_AUTH_TOKEN"),
@@ -342,7 +359,16 @@ class ZyndBase(
         name = self._config.name or "Unnamed"
         entity_id = self.entity_id
         webhook_url = getattr(self, "webhook_url", None)
-        price = self._config.price or "Free"
+        # Mirror the runtime price resolution: prefer the explicit price
+        # string, fall back to formatting entity_pricing, then "Free".
+        price = self._config.price
+        if not price and self._config.entity_pricing:
+            base = self._config.entity_pricing.get("base_price_usd")
+            if isinstance(base, (int, float)) and base > 0:
+                currency = self._config.entity_pricing.get("currency") or "USDC"
+                price = f"${base} {currency}"
+        if not price:
+            price = "Free"
         pub_key = self.keypair.public_key_string if self.keypair else "-"
         address = self.pay_to_address
 

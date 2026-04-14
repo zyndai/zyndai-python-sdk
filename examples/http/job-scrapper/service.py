@@ -1,5 +1,5 @@
 """
-__SERVICE_NAME__ — Service on Zynd Network
+linkedin-job-scraper — Service on Zynd Network
 """
 
 from zyndai_agent.service import ServiceConfig, ZyndService
@@ -25,17 +25,17 @@ def handle_request(input_text: str) -> str:
 
     Replace this with your own implementation.
     """
-    return f"Hello from __SERVICE_NAME__! You sent: {input_text}"
+    return f"Hello from linkedin-job-scraper! You sent: {input_text}"
 
 
 if __name__ == "__main__":
     config = ServiceConfig(
-        name=_config.get("name", "__SERVICE_NAME__"),
+        name=_config.get("name", "linkedin-job-scraper"),
         description=_config.get("description", ""),
         capabilities=_config.get("capabilities"),
         category=_config.get("category", "general"),
         tags=_config.get("tags", []),
-        summary=_config.get("summary", "__SERVICE_NAME__ service"),
+        summary=_config.get("summary", "linkedin-job-scraper service"),
         service_endpoint=_config.get("service_endpoint"),
         openapi_url=_config.get("openapi_url"),
         webhook_host="0.0.0.0",
@@ -49,13 +49,12 @@ if __name__ == "__main__":
             _config.get("keypair_path"),
         ),
         price=_config.get("price"),
-        entity_pricing=_config.get("entity_pricing"),
     )
 
     service = ZyndService(service_config=config)
     service.set_handler(handle_request)
 
-    print(f"\n__SERVICE_NAME__ is running")
+    print(f"\nlinkedin-job-scraper is running")
     print(f"Webhook: {service.webhook_url}")
     print("Type 'exit' to quit\n")
 
