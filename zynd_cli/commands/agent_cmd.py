@@ -165,16 +165,18 @@ def _agent_init(args: argparse.Namespace):
 
     console.print(f"  [bold #8B5CF6]\u2713[/bold #8B5CF6] Agent name (ZNS): [bold]{entity_name_zns}[/bold]")
 
-    # 6. Create agent.config.json with a minimal canonical schema. The core
-    # 11 fields (name, entity_name, description, category, tags, summary,
-    # webhook_port, registry_url, keypair_path, entity_index, entity_pricing)
-    # match service.config.json byte-for-byte. `framework` is the only
-    # agent-specific field — scaffold-time marker, also consumed by the
-    # template loader. Everything else that USED to live here is either
-    # derived at runtime (entity_url from webhook_port, price from
-    # entity_pricing) or implicit from which file you're looking at
-    # (entity_type is always "agent" here; webhook_host is always "0.0.0.0"
-    # per the template default).
+    # 6. Create agent.config.json with a minimal canonical schema.
+    #
+    # Deploy-config (keypair_path, registry_url) lives in .env only —
+    # those are environment-specific paths/URLs and shouldn't be baked
+    # into the per-project config file. The runtime reads them from
+    # os.environ with load_dotenv() pulling them out of .env at startup.
+    # This is the 12-factor split: semantic/code config in config.json,
+    # environment-specific values in .env.
+    #
+    # Everything else that's derivable (entity_url, entity_type,
+    # webhook_host, price) stays out of the file too — see previous
+    # minimization pass in commit 4c691c5.
     registry_url = get_registry_url(getattr(args, "registry", None))
     config = {
         "name": name,
@@ -185,8 +187,6 @@ def _agent_init(args: argparse.Namespace):
         "tags": [],
         "summary": "",
         "webhook_port": 5000,
-        "registry_url": registry_url,
-        "keypair_path": str(kp_path),
         "entity_index": index,
         "entity_pricing": None,
     }
@@ -254,6 +254,17 @@ def _agent_run(args: argparse.Namespace):
     import time
     import requests as _req
 
+    # Pull .env into os.environ so ZYND_AGENT_KEYPAIR_PATH and
+    # ZYND_REGISTRY_URL are available to both this CLI process and the
+    # child agent.py subprocess. load_dotenv() by default doesn't override
+    # already-set env vars, so anything the user exported in their shell
+    # still wins.
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
     config_path = args.config
     if not os.path.exists(config_path):
         print(f"Error: {config_path} not found.", file=sys.stderr)
@@ -267,15 +278,27 @@ def _agent_run(args: argparse.Namespace):
     with open(config_path, "r") as f:
         config = json.load(f)
 
-    keypair_path = config.get("keypair_path")
-    if not keypair_path or not os.path.exists(keypair_path):
-        print(f"Error: Agent keypair not found at {keypair_path}", file=sys.stderr)
+    # Keypair path comes from ZYND_AGENT_KEYPAIR_PATH in .env (canonical
+    # location as of the config-minimization pass). Fall back to the
+    # legacy config.json location for backward compat with projects
+    # scaffolded before the split.
+    keypair_path = os.environ.get("ZYND_AGENT_KEYPAIR_PATH") or config.get("keypair_path")
+    if not keypair_path:
+        print(
+            "Error: agent keypair path not set. Export ZYND_AGENT_KEYPAIR_PATH "
+            "or add it to .env in the current directory.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not os.path.exists(keypair_path):
+        print(f"Error: agent keypair not found at {keypair_path}", file=sys.stderr)
         sys.exit(1)
 
     kp = load_keypair(keypair_path)
-    registry_url = get_registry_url(getattr(args, "registry", None)) or config.get("registry_url", "http://localhost:8080")
+    # get_registry_url already walks CLI flag → ZYND_REGISTRY_URL → ~/.zynd/config.json → default
+    registry_url = get_registry_url(getattr(args, "registry", None))
     port = args.port or config.get("webhook_port", 5000)
-    entity_url = args.entity_url or config.get("entity_url", f"http://localhost:{port}")
+    entity_url = args.entity_url or f"http://localhost:{port}"
     health_url = f"http://localhost:{port}/health"
 
     dev_key = developer_key_path()

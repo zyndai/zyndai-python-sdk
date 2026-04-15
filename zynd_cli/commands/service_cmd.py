@@ -142,16 +142,14 @@ def _service_init(args: argparse.Namespace):
         service_endpoint = None
         openapi_url = None
 
-    # Write service.config.json with a minimal canonical schema. The core 11
-    # fields (name, entity_name, description, category, tags, summary,
-    # webhook_port, registry_url, keypair_path, entity_index, entity_pricing)
-    # match agent.config.json byte-for-byte. service_endpoint and openapi_url
-    # are the only service-specific fields — optional overrides for when the
-    # service has a distinct API endpoint or publishes an OpenAPI spec.
-    # Everything else that USED to live here is either derived at runtime
-    # (entity_url from service_endpoint or webhook_port, price from
-    # entity_pricing) or implicit (entity_type is always "service" here;
-    # webhook_host is always "0.0.0.0" per the template default).
+    # Write service.config.json with a minimal canonical schema.
+    #
+    # Deploy-config (keypair_path, registry_url) lives in .env only —
+    # environment-specific paths/URLs shouldn't be baked into the per-
+    # project config file. 12-factor split: code config in config.json,
+    # environment-specific values in .env. Derivable fields (entity_url,
+    # entity_type, webhook_host, price) also stay out — see commit
+    # 4c691c5 for the full rationale.
     config = {
         "name": name,
         "entity_name": entity_name_zns,
@@ -162,8 +160,6 @@ def _service_init(args: argparse.Namespace):
         "webhook_port": 5000,
         "service_endpoint": service_endpoint,
         "openapi_url": openapi_url,
-        "registry_url": registry_url,
-        "keypair_path": str(kp_path),
         "entity_index": index,
         "entity_pricing": None,
     }
@@ -220,6 +216,15 @@ def _service_run(args: argparse.Namespace):
     import time
     import requests as _req
 
+    # Pull .env into os.environ so ZYND_SERVICE_KEYPAIR_PATH and
+    # ZYND_REGISTRY_URL are available. load_dotenv() doesn't override
+    # already-set env vars, so anything exported in the shell wins.
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
     config_path = args.config
     if not os.path.exists(config_path):
         print(f"Error: {config_path} not found.", file=sys.stderr)
@@ -233,14 +238,25 @@ def _service_run(args: argparse.Namespace):
     with open(config_path) as f:
         config = json.load(f)
 
-    kp_path = config.get("keypair_path")
-    if not kp_path or not os.path.exists(kp_path):
-        print("Error: keypair_path not found in config.", file=sys.stderr)
+    # Keypair path comes from ZYND_SERVICE_KEYPAIR_PATH in .env (canonical
+    # location as of the config-minimization pass). Fall back to the
+    # legacy config.json location for backward compat.
+    kp_path = os.environ.get("ZYND_SERVICE_KEYPAIR_PATH") or config.get("keypair_path")
+    if not kp_path:
+        print(
+            "Error: service keypair path not set. Export ZYND_SERVICE_KEYPAIR_PATH "
+            "or add it to .env in the current directory.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not os.path.exists(kp_path):
+        print(f"Error: service keypair not found at {kp_path}", file=sys.stderr)
         sys.exit(1)
 
     kp, meta = load_keypair_with_metadata(kp_path)
     service_id = generate_entity_id(kp.public_key_bytes, "service")
-    registry_url = get_registry_url(getattr(args, "registry", None)) or config.get("registry_url", "http://localhost:8080")
+    # get_registry_url already walks CLI flag → ZYND_REGISTRY_URL → ~/.zynd/config.json → default
+    registry_url = get_registry_url(getattr(args, "registry", None))
     port = args.port or config.get("webhook_port", 5000)
     health_url = f"http://localhost:{port}/health"
 
