@@ -165,20 +165,32 @@ def _agent_init(args: argparse.Namespace):
 
     console.print(f"  [bold #8B5CF6]\u2713[/bold #8B5CF6] Agent name (ZNS): [bold]{entity_name_zns}[/bold]")
 
-    # 6. Create agent.config.json
+    # 6. Create agent.config.json. The schema is deliberately identical to
+    # service.config.json — same field set, same order, same types — so
+    # operators only have to learn one shape and so we can later unify the
+    # init / run code paths further if it pays off. Fields that don't apply
+    # to agents (service_endpoint, openapi_url) stay in the dict as null.
     registry_url = get_registry_url(getattr(args, "registry", None))
+    webhook_port = 5000
     config = {
         "name": name,
         "entity_name": entity_name_zns,
+        "entity_type": "agent",
         "framework": framework,
         "description": f"{name} agent",
         "category": "general",
         "tags": [],
         "summary": "",
-        "webhook_port": 5000,
+        "webhook_host": "0.0.0.0",
+        "webhook_port": webhook_port,
+        "entity_url": f"http://localhost:{webhook_port}",
+        "service_endpoint": None,
+        "openapi_url": None,
         "registry_url": registry_url,
         "keypair_path": str(kp_path),
         "entity_index": index,
+        "price": None,
+        "entity_pricing": None,
     }
 
     with open("agent.config.json", "w") as f:

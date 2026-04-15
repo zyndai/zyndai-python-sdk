@@ -100,7 +100,7 @@ def _service_init(args: argparse.Namespace):
         print("Error: Service name is required.", file=sys.stderr)
         sys.exit(1)
 
-    service_name_zns = _to_zns_name(name)
+    entity_name_zns = _to_zns_name(name)
 
     # Determine derivation index
     if args.index is not None:
@@ -142,20 +142,30 @@ def _service_init(args: argparse.Namespace):
         service_endpoint = None
         openapi_url = None
 
-    # Write service.config.json
+    # Write service.config.json. The schema is deliberately identical to
+    # agent.config.json — same field set, same order, same types — so
+    # operators only have to learn one shape. Fields that don't apply to
+    # services (framework) stay in the dict as null.
+    webhook_port = 5000
     config = {
         "name": name,
-        "service_name": service_name_zns,
+        "entity_name": entity_name_zns,
+        "entity_type": "service",
+        "framework": None,
         "description": description,
         "category": category,
         "tags": [],
         "summary": "",
+        "webhook_host": "0.0.0.0",
+        "webhook_port": webhook_port,
+        "entity_url": service_endpoint or f"http://localhost:{webhook_port}",
         "service_endpoint": service_endpoint,
         "openapi_url": openapi_url,
-        "webhook_port": 5000,
         "registry_url": registry_url,
         "keypair_path": str(kp_path),
         "entity_index": index,
+        "price": None,
+        "entity_pricing": None,
     }
     with open("service.config.json", "w") as f:
         json.dump(config, f, indent=2)
@@ -196,7 +206,7 @@ def _service_init(args: argparse.Namespace):
 
     print(f"\n  Service project created!")
     print(f"    Name:       {name}")
-    print(f"    ZNS Name:   {service_name_zns}")
+    print(f"    ZNS Name:   {entity_name_zns}")
     print(f"    Service ID: {svc_id}")
     print(f"    Keypair:    {kp_path}")
     print(f"\n  Next steps:")
@@ -234,7 +244,12 @@ def _service_run(args: argparse.Namespace):
     port = args.port or config.get("webhook_port", 5000)
     health_url = f"http://localhost:{port}/health"
 
-    service_endpoint = config.get("service_endpoint") or f"http://localhost:{port}"
+    # entity_url is the primary webhook URL; service_endpoint is the (usually
+    # identical) service-specific API endpoint. Both are written into the
+    # unified config shape by _service_init, but fall back to localhost:<port>
+    # if someone hand-authored a config without them.
+    entity_url = config.get("entity_url") or f"http://localhost:{port}"
+    service_endpoint = config.get("service_endpoint") or entity_url
 
     dev_path = developer_key_path()
     if not dev_path.exists():
@@ -246,7 +261,7 @@ def _service_run(args: argparse.Namespace):
     derived = (meta or {}).get("derived_from", {})
     entity_index = derived.get("index", config.get("entity_index", 0))
     proof = create_derivation_proof(dev_kp, kp.public_key, entity_index)
-    service_name_zns = config.get("service_name", "")
+    entity_name_zns = config.get("entity_name", "")
 
     from rich.console import Console
     console = Console()
@@ -318,13 +333,13 @@ def _service_run(args: argparse.Namespace):
                 registry_url=registry_url,
                 keypair=kp,
                 name=config["name"],
-                entity_url=service_endpoint,
+                entity_url=entity_url,
                 category=config.get("category", "general"),
                 tags=config.get("tags", []),
                 summary=config.get("summary", ""),
                 developer_id=dev_id,
                 developer_proof=proof,
-                entity_name=service_name_zns,
+                entity_name=entity_name_zns,
                 entity_type="service",
                 service_endpoint=service_endpoint,
                 openapi_url=config.get("openapi_url"),
@@ -334,8 +349,8 @@ def _service_run(args: argparse.Namespace):
             console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Service registered: {service_id}")
             if fqan:
                 console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
-            if service_name_zns:
-                console.print(f"  [dim]ZNS Name:[/dim] {service_name_zns}")
+            if entity_name_zns:
+                console.print(f"  [dim]ZNS Name:[/dim] {entity_name_zns}")
         except Exception as e:
             console.print(f"  [bold red]✗[/bold red] Registration failed: {e}")
 
