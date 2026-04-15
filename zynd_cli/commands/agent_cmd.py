@@ -49,7 +49,7 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
         help="Start the agent, register/update it on the network, and keep running",
     )
     run_p.add_argument("--config", default="agent.config.json", help="Path to agent.config.json")
-    run_p.add_argument("--agent-url", help="Override agent URL for registration")
+    run_p.add_argument("--entity-url", help="Override entity URL for registration")
     run_p.add_argument("--port", type=int, help="Override webhook port")
     run_p.set_defaults(func=_agent_run)
 
