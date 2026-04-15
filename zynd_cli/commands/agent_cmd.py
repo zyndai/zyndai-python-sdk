@@ -165,31 +165,29 @@ def _agent_init(args: argparse.Namespace):
 
     console.print(f"  [bold #8B5CF6]\u2713[/bold #8B5CF6] Agent name (ZNS): [bold]{entity_name_zns}[/bold]")
 
-    # 6. Create agent.config.json. The schema is deliberately identical to
-    # service.config.json — same field set, same order, same types — so
-    # operators only have to learn one shape and so we can later unify the
-    # init / run code paths further if it pays off. Fields that don't apply
-    # to agents (service_endpoint, openapi_url) stay in the dict as null.
+    # 6. Create agent.config.json with a minimal canonical schema. The core
+    # 11 fields (name, entity_name, description, category, tags, summary,
+    # webhook_port, registry_url, keypair_path, entity_index, entity_pricing)
+    # match service.config.json byte-for-byte. `framework` is the only
+    # agent-specific field — scaffold-time marker, also consumed by the
+    # template loader. Everything else that USED to live here is either
+    # derived at runtime (entity_url from webhook_port, price from
+    # entity_pricing) or implicit from which file you're looking at
+    # (entity_type is always "agent" here; webhook_host is always "0.0.0.0"
+    # per the template default).
     registry_url = get_registry_url(getattr(args, "registry", None))
-    webhook_port = 5000
     config = {
         "name": name,
         "entity_name": entity_name_zns,
-        "entity_type": "agent",
         "framework": framework,
         "description": f"{name} agent",
         "category": "general",
         "tags": [],
         "summary": "",
-        "webhook_host": "0.0.0.0",
-        "webhook_port": webhook_port,
-        "entity_url": f"http://localhost:{webhook_port}",
-        "service_endpoint": None,
-        "openapi_url": None,
+        "webhook_port": 5000,
         "registry_url": registry_url,
         "keypair_path": str(kp_path),
         "entity_index": index,
-        "price": None,
         "entity_pricing": None,
     }
 

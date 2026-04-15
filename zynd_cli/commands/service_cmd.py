@@ -142,29 +142,29 @@ def _service_init(args: argparse.Namespace):
         service_endpoint = None
         openapi_url = None
 
-    # Write service.config.json. The schema is deliberately identical to
-    # agent.config.json — same field set, same order, same types — so
-    # operators only have to learn one shape. Fields that don't apply to
-    # services (framework) stay in the dict as null.
-    webhook_port = 5000
+    # Write service.config.json with a minimal canonical schema. The core 11
+    # fields (name, entity_name, description, category, tags, summary,
+    # webhook_port, registry_url, keypair_path, entity_index, entity_pricing)
+    # match agent.config.json byte-for-byte. service_endpoint and openapi_url
+    # are the only service-specific fields — optional overrides for when the
+    # service has a distinct API endpoint or publishes an OpenAPI spec.
+    # Everything else that USED to live here is either derived at runtime
+    # (entity_url from service_endpoint or webhook_port, price from
+    # entity_pricing) or implicit (entity_type is always "service" here;
+    # webhook_host is always "0.0.0.0" per the template default).
     config = {
         "name": name,
         "entity_name": entity_name_zns,
-        "entity_type": "service",
-        "framework": None,
         "description": description,
         "category": category,
         "tags": [],
         "summary": "",
-        "webhook_host": "0.0.0.0",
-        "webhook_port": webhook_port,
-        "entity_url": service_endpoint or f"http://localhost:{webhook_port}",
+        "webhook_port": 5000,
         "service_endpoint": service_endpoint,
         "openapi_url": openapi_url,
         "registry_url": registry_url,
         "keypair_path": str(kp_path),
         "entity_index": index,
-        "price": None,
         "entity_pricing": None,
     }
     with open("service.config.json", "w") as f:
@@ -244,12 +244,13 @@ def _service_run(args: argparse.Namespace):
     port = args.port or config.get("webhook_port", 5000)
     health_url = f"http://localhost:{port}/health"
 
-    # entity_url is the primary webhook URL; service_endpoint is the (usually
-    # identical) service-specific API endpoint. Both are written into the
-    # unified config shape by _service_init, but fall back to localhost:<port>
-    # if someone hand-authored a config without them.
-    entity_url = config.get("entity_url") or f"http://localhost:{port}"
-    service_endpoint = config.get("service_endpoint") or entity_url
+    # entity_url is derived — it's not a first-class config field. Precedence:
+    #   1. service_endpoint (config override, intended for distinct API hosts)
+    #   2. http://localhost:<webhook_port> (the default local bind)
+    # If you're running behind ngrok/proxy, set service_endpoint in the
+    # config and both entity_url and service_endpoint will point at it.
+    service_endpoint = config.get("service_endpoint")
+    entity_url = service_endpoint or f"http://localhost:{port}"
 
     dev_path = developer_key_path()
     if not dev_path.exists():
