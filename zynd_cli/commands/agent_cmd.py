@@ -4,43 +4,17 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import sys
 from pathlib import Path
-
-
-def _slugify_name(name: str) -> str:
-    """Convert a free-form display name to a ZNS-safe slug.
-
-    Same rules as service_cmd._slugify_name — lowercase, spaces/
-    underscores → hyphens, drop non-alphanumeric, collapse repeated
-    hyphens, trim ends. Kept as a local helper (instead of a shared
-    module) to avoid a circular-import hazard between the two command
-    modules.
-    """
-    slug = re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-").replace("_", "-"))
-    slug = re.sub(r"-+", "-", slug).strip("-")
-    if len(slug) < 3:
-        slug = slug + "-agent"
-    if len(slug) > 36:
-        slug = slug[:36]
-    return slug
+from typing import Optional
 
 from zyndai_agent.ed25519_identity import (
     load_keypair,
     load_keypair_with_metadata,
     save_keypair,
     derive_agent_keypair,
-    create_derivation_proof,
-    generate_developer_id,
 )
-from zyndai_agent.dns_registry import (
-    register_entity,
-    get_entity,
-    update_entity,
-    check_entity_name_available,
-    get_entity_fqan,
-)
+from zyndai_agent.dns_registry import check_entity_name_available
 from zynd_cli.config import (
     developer_key_path,
     agents_dir,
@@ -48,7 +22,83 @@ from zynd_cli.config import (
     ensure_zynd_dir,
     get_registry_url,
 )
+from zynd_cli.commands._entity_base import EntityRunner, slugify_name
 from zynd_cli.templates import FRAMEWORKS, FRAMEWORK_ORDER
+
+
+class AgentRunner(EntityRunner):
+    """`zynd agent run` — starts and upserts an agent entity.
+
+    Adds two agent-specific behaviors on top of the base runner:
+      * Checks that the ZNS name is available under the developer's
+        handle before registering.
+      * Includes a SHA-256 ``codebase_hash`` on update so the registry
+        can surface drift between deployed versions.
+    """
+
+    entity_type = "agent"
+    label = "Agent"
+    script_name = "agent.py"
+    config_name = "agent.config.json"
+    keypair_env = "ZYND_AGENT_KEYPAIR_PATH"
+    slug_suffix = "-agent"
+
+    def pre_register(
+        self, config, kp, registry_url, dev_id, entity_id, console
+    ) -> Optional[str]:
+        name_zns = super().pre_register(
+            config, kp, registry_url, dev_id, entity_id, console
+        )
+        if not name_zns:
+            return None
+        try:
+            import requests as _req
+
+            dev_resp = _req.get(f"{registry_url}/v1/developers/{dev_id}")
+            if dev_resp.status_code == 404:
+                console.print(
+                    f"  [dim]Warning: Developer not found on registry — "
+                    f"name binding skipped[/dim]"
+                )
+                return None
+            if dev_resp.status_code != 200:
+                return name_zns
+            dev_handle = dev_resp.json().get("dev_handle", "")
+            if not dev_handle:
+                console.print(
+                    f"  [dim]Warning: No developer handle — name binding "
+                    f"skipped[/dim]"
+                )
+                return None
+            avail = check_entity_name_available(
+                registry_url, dev_handle, name_zns
+            )
+            if not avail.get("available", True):
+                existing_id = avail.get("existing_entity_id", "")
+                if existing_id and existing_id != entity_id:
+                    console.print(
+                        f"  [bold red]✗[/bold red] Name '{name_zns}' "
+                        f"already taken by {existing_id}"
+                    )
+                    sys.exit(1)
+            else:
+                console.print(
+                    f"  [bold #8B5CF6]✓[/bold #8B5CF6] Name "
+                    f"'{name_zns}' is available"
+                )
+        except SystemExit:
+            raise
+        except Exception as e:
+            console.print(
+                f"  [dim]Warning: Could not check name: {e}[/dim]"
+            )
+        return name_zns
+
+    def build_update_body(self, config, entity_url):
+        body = super().build_update_body(config, entity_url)
+        body["entity_url"] = entity_url
+        body["codebase_hash"] = _compute_codebase_hash(".")
+        return body
 
 
 def register_parser(subparsers: argparse._SubParsersAction, parents=None):
@@ -126,10 +176,8 @@ def _agent_init(args: argparse.Namespace):
     ensure_zynd_dir()
     dev_kp = load_keypair(str(dev_key))
 
-    # Determine derivation index
     index = getattr(args, "index", None)
     if index is None:
-        # Find next available index by scanning existing agent dirs
         d = agents_dir()
         used_indices = set()
         if d.exists():
@@ -148,7 +196,6 @@ def _agent_init(args: argparse.Namespace):
         while index in used_indices:
             index += 1
 
-    # Create agent directory
     a_dir = agent_dir(name)
     a_dir.mkdir(parents=True, exist_ok=True)
     kp_path = a_dir / "keypair.json"
@@ -175,27 +222,13 @@ def _agent_init(args: argparse.Namespace):
             console.print("  [dim]Aborted.[/dim]")
             return
 
-    # 5b. Derive the ZNS identifier (slug form) from the agent name. We
-    # compute it here only to PREVIEW it to the user during init so they
-    # can see what FQAN their agent will bind to — it is NOT stored in
-    # the config file. At runtime, _agent_run re-derives the slug from
-    # config["name"] via the same helper, and operators can override it
-    # by adding an explicit "entity_name" key to the config (rare path
-    # for when the display name should differ from the ZNS handle).
-    entity_name_zns = _slugify_name(name)
-
+    # 5b. Preview the ZNS slug so the user sees which FQAN they're
+    # about to bind. Not stored — runtime re-derives via slugify_name.
+    entity_name_zns = slugify_name(name, "-agent")
     console.print(f"  [bold #8B5CF6]\u2713[/bold #8B5CF6] Agent name (ZNS): [bold]{entity_name_zns}[/bold]")
 
-    # 6. Create agent.config.json with a minimal canonical schema.
-    #
-    # Deploy-config (keypair_path, registry_url) lives in .env only —
-    # 12-factor split. Derivable fields (entity_url, entity_type,
-    # webhook_host, price, entity_name) also stay out:
-    #
-    #   - entity_name is a slugified version of `name`; runtime computes
-    #     it via _slugify_name(config["name"]) and the user can still
-    #     override by adding an explicit "entity_name" field to the JSON
-    #     if they want a custom ZNS handle that isn't the auto-slug.
+    # 6. Minimal config (deploy-config lives in .env; derivable fields
+    # excluded; entity_name auto-derived from `name` at runtime).
     registry_url = get_registry_url(getattr(args, "registry", None))
     config = {
         "name": name,
@@ -267,208 +300,12 @@ def _agent_init(args: argparse.Namespace):
 
 
 def _agent_run(args: argparse.Namespace):
-    """Start the agent, health-check it, upsert on the registry, and keep running."""
-    import subprocess
-    import time
-    import requests as _req
-
-    # Pull .env into os.environ so ZYND_AGENT_KEYPAIR_PATH and
-    # ZYND_REGISTRY_URL are available to both this CLI process and the
-    # child agent.py subprocess. load_dotenv() by default doesn't override
-    # already-set env vars, so anything the user exported in their shell
-    # still wins.
-    # load_dotenv() with no args walks up from the *calling file* (the
-    # installed package path), not the user's cwd — so it never finds the
-    # project's .env. Point it explicitly at ./.env in the current dir.
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(dotenv_path=Path.cwd() / ".env")
-    except ImportError:
-        pass
-
-    config_path = args.config
-    if not os.path.exists(config_path):
-        print(f"Error: {config_path} not found.", file=sys.stderr)
-        print("Run 'zynd agent init' first to create an agent project.")
-        sys.exit(1)
-
-    if not os.path.exists("agent.py"):
-        print("Error: agent.py not found in current directory.", file=sys.stderr)
-        sys.exit(1)
-
-    with open(config_path, "r") as f:
-        config = json.load(f)
-
-    # Keypair path comes from ZYND_AGENT_KEYPAIR_PATH in .env (canonical
-    # location as of the config-minimization pass). Fall back to the
-    # legacy config.json location for backward compat with projects
-    # scaffolded before the split.
-    keypair_path = os.environ.get("ZYND_AGENT_KEYPAIR_PATH") or config.get("keypair_path")
-    if not keypair_path:
-        print(
-            "Error: agent keypair path not set. Export ZYND_AGENT_KEYPAIR_PATH "
-            "or add it to .env in the current directory.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    if not os.path.exists(keypair_path):
-        print(f"Error: agent keypair not found at {keypair_path}", file=sys.stderr)
-        sys.exit(1)
-
-    kp = load_keypair(keypair_path)
-    # get_registry_url already walks CLI flag → ZYND_REGISTRY_URL → ~/.zynd/config.json → default
-    registry_url = get_registry_url(getattr(args, "registry", None))
-    port = args.port or config.get("webhook_port", 5000)
-    entity_url = args.entity_url or f"http://localhost:{port}"
-    health_url = f"http://localhost:{port}/health"
-
-    dev_key = developer_key_path()
-    if not dev_key.exists():
-        print("Error: No developer keypair found.", file=sys.stderr)
-        sys.exit(1)
-
-    dev_kp = load_keypair(str(dev_key))
-    _, metadata = load_keypair_with_metadata(keypair_path)
-    derived_from = (metadata or {}).get("derived_from", {})
-    entity_index = derived_from.get("index", config.get("entity_index", 0))
-    proof = create_derivation_proof(dev_kp, kp.public_key, entity_index)
-    dev_id = generate_developer_id(dev_kp.public_key_bytes)
-
-    from rich.console import Console
-    console = Console()
-
-    # --- Step 1: Start the agent as a background process ---
-    console.print()
-    console.print(f"  [bold #8B5CF6]▶[/bold #8B5CF6] Starting [bold]{config.get('name', 'agent')}[/bold]...")
-
-    env = os.environ.copy()
-    env["ZYND_AGENT_KEYPAIR_PATH"] = keypair_path
-    env["ZYND_REGISTRY_URL"] = registry_url
-    if args.port:
-        env["ZYND_WEBHOOK_PORT"] = str(args.port)
-
-    proc = subprocess.Popen(
-        [sys.executable, "agent.py"],
-        env=env,
-        stdout=None,
-        stderr=None,
-    )
-
-    # --- Step 2: Health-check (poll /health for up to 15s) ---
-    console.print(f"  [dim]Waiting for agent to start (health: {health_url})...[/dim]")
-    healthy = False
-    for _ in range(30):
-        if proc.poll() is not None:
-            console.print(f"  [bold red]✗[/bold red] Agent process exited with code {proc.returncode}")
-            sys.exit(1)
-        try:
-            resp = _req.get(health_url, timeout=1)
-            if resp.status_code == 200:
-                healthy = True
-                break
-        except _req.ConnectionError:
-            pass
-        time.sleep(0.5)
-
-    if not healthy:
-        console.print(f"  [bold red]✗[/bold red] Agent did not become healthy within 15s")
-        proc.terminate()
-        sys.exit(1)
-
-    console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent is healthy")
-
-    # --- Step 3: Check name availability ---
-    # entity_name is either an explicit override in config.json (rare) or
-    # slugified on the fly from the display name (the common case).
-    entity_name_zns = config.get("entity_name") or _slugify_name(config.get("name", ""))
-    if entity_name_zns:
-        try:
-            dev_resp = _req.get(f"{registry_url}/v1/developers/{dev_id}")
-            if dev_resp.status_code == 200:
-                dev_handle = dev_resp.json().get("dev_handle", "")
-                if dev_handle:
-                    avail = check_entity_name_available(registry_url, dev_handle, entity_name_zns)
-                    if not avail.get("available", True):
-                        existing_id = avail.get("existing_entity_id", "")
-                        if existing_id and existing_id != kp.entity_id:
-                            console.print(f"  [bold red]✗[/bold red] Name '{entity_name_zns}' already taken by {existing_id}")
-                            proc.terminate()
-                            sys.exit(1)
-                    else:
-                        console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Name '{entity_name_zns}' is available")
-                else:
-                    console.print(f"  [dim]Warning: No developer handle — name binding skipped[/dim]")
-                    entity_name_zns = None
-            elif dev_resp.status_code == 404:
-                console.print(f"  [dim]Warning: Developer not found on registry — name binding skipped[/dim]")
-                entity_name_zns = None
-        except Exception as e:
-            console.print(f"  [dim]Warning: Could not check name: {e}[/dim]")
-
-    # --- Step 4: Upsert on registry ---
-    existing = get_entity(registry_url, kp.entity_id)
-
-    if existing is not None:
-        console.print(f"  [dim]Agent already registered — updating...[/dim]")
-        codebase_hash = _compute_codebase_hash(".")
-        update_body = {
-            "name": config["name"],
-            "entity_url": entity_url,
-            "category": config.get("category", "general"),
-            "tags": config.get("tags", []),
-            "summary": config.get("summary", ""),
-            "codebase_hash": codebase_hash,
-        }
-        success = update_entity(registry_url, kp.entity_id, kp, update_body)
-        if success:
-            fqan = get_entity_fqan(registry_url, kp.entity_id)
-            console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent updated on registry")
-            console.print(f"  [dim]Codebase hash:[/dim] {codebase_hash[:16]}...")
-            if fqan:
-                console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
-        else:
-            console.print(f"  [bold red]✗[/bold red] Update failed")
-    else:
-        try:
-            entity_id = register_entity(
-                registry_url=registry_url,
-                keypair=kp,
-                name=config["name"],
-                entity_url=entity_url,
-                category=config.get("category", "general"),
-                tags=config.get("tags", []),
-                summary=config.get("summary", ""),
-                developer_id=dev_id,
-                developer_proof=proof,
-                entity_name=entity_name_zns,
-                entity_pricing=config.get("entity_pricing"),
-            )
-            fqan = get_entity_fqan(registry_url, entity_id)
-            console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent registered: {entity_id}")
-            if fqan:
-                console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
-            if entity_name_zns:
-                console.print(f"  [dim]ZNS Name:[/dim] {entity_name_zns}")
-        except Exception as e:
-            console.print(f"  [bold red]✗[/bold red] Registration failed: {e}")
-
-    # --- Step 5: Keep the agent running ---
-    console.print()
-    console.print(f"  [bold green]Agent is running.[/bold green] Press Ctrl+C to stop.")
-    console.print()
-    try:
-        proc.wait()
-    except KeyboardInterrupt:
-        console.print(f"\n  [dim]Stopping agent...[/dim]")
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+    """Delegate to the shared EntityRunner base class."""
+    AgentRunner().run(args)
 
 
 def _compute_codebase_hash(root_dir: str) -> str:
-    """Compute SHA-256 hash of all source files in the agent's directory.
+    """SHA-256 over source files under root_dir.
 
     Includes: .py, .json (except agent.config.json), .toml, .yaml, .yml, .txt, .md, .cfg
     Excludes: .env, __pycache__, .git, node_modules, .well-known, .agent*

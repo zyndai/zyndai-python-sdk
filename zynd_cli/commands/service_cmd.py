@@ -3,24 +3,14 @@
 import argparse
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
 from zyndai_agent.ed25519_identity import (
     load_keypair,
-    load_keypair_with_metadata,
-    save_keypair,
     derive_agent_keypair,
-    create_derivation_proof,
-    generate_developer_id,
+    save_keypair,
     generate_entity_id,
-)
-from zyndai_agent.dns_registry import (
-    register_entity,
-    get_entity,
-    update_entity,
-    get_entity_fqan,
 )
 from zynd_cli.config import (
     developer_key_path,
@@ -30,6 +20,28 @@ from zynd_cli.config import (
     ensure_zynd_dir,
     get_registry_url,
 )
+from zynd_cli.commands._entity_base import EntityRunner, slugify_name
+
+
+class ServiceRunner(EntityRunner):
+    """`zynd service run` — starts and upserts a service entity."""
+
+    entity_type = "service"
+    label = "Service"
+    script_name = "service.py"
+    config_name = "service.config.json"
+    keypair_env = "ZYND_SERVICE_KEYPAIR_PATH"
+    slug_suffix = "-service"
+
+    def build_register_extras(self, config: dict, entity_url: str) -> dict:
+        # The registry rejects service registration without a
+        # service_endpoint. Default it to the local webhook URL so the
+        # common single-host case just works; operators who front the
+        # service with ngrok/a proxy override via config.service_endpoint.
+        return {
+            "service_endpoint": config.get("service_endpoint") or entity_url,
+            "openapi_url": config.get("openapi_url"),
+        }
 
 
 def register_parser(subparsers: argparse._SubParsersAction, parents=None):
@@ -64,24 +76,6 @@ def _service_help(args):
     print("  run    Start the service, register/update it on the network, and run")
 
 
-def _slugify_name(name: str) -> str:
-    """Convert a free-form display name to a ZNS-safe slug.
-
-    Lowercase, spaces/underscores → hyphens, drop anything that isn't
-    alphanumeric or a hyphen, collapse repeated hyphens, trim the ends.
-    Intentionally does NOT prefix services with "svc:" — entity_type on
-    the registration payload already discriminates agents from services,
-    so adding a prefix on the ZNS handle was redundant noise.
-    """
-    slug = re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-").replace("_", "-"))
-    slug = re.sub(r"-+", "-", slug).strip("-")
-    if len(slug) < 3:
-        slug = slug + "-service"
-    if len(slug) > 36:
-        slug = slug[:36]
-    return slug
-
-
 def _service_init(args: argparse.Namespace):
     """Scaffold a new service project."""
     ensure_zynd_dir()
@@ -94,7 +88,6 @@ def _service_init(args: argparse.Namespace):
 
     dev_kp = load_keypair(str(dev_path))
 
-    # Get service name
     name = args.name
     if not name:
         try:
@@ -107,9 +100,8 @@ def _service_init(args: argparse.Namespace):
         print("Error: Service name is required.", file=sys.stderr)
         sys.exit(1)
 
-    entity_name_zns = _slugify_name(name)
+    entity_name_zns = slugify_name(name, "-service")
 
-    # Determine derivation index
     if args.index is not None:
         index = args.index
     else:
@@ -117,11 +109,9 @@ def _service_init(args: argparse.Namespace):
         existing = list(svc_dir.iterdir()) if svc_dir.exists() else []
         index = len(existing)
 
-    # Derive keypair
     svc_kp = derive_agent_keypair(dev_kp.private_key, index)
     svc_id = generate_entity_id(svc_kp.public_key_bytes, "service")
 
-    # Store keypair
     svc_safe = name.lower().replace(" ", "-")
     kp_dir = service_dir(svc_safe)
     kp_dir.mkdir(parents=True, exist_ok=True)
@@ -137,7 +127,6 @@ def _service_init(args: argparse.Namespace):
 
     registry_url = get_registry_url(getattr(args, "registry", None))
 
-    # Get optional fields
     try:
         description = input("  Description (optional): ").strip()
         category = input("  Category [general]: ").strip() or "general"
@@ -149,16 +138,11 @@ def _service_init(args: argparse.Namespace):
         service_endpoint = None
         openapi_url = None
 
-    # Write service.config.json with a minimal canonical schema.
-    #
-    # Deploy-config (keypair_path, registry_url) lives in .env only —
-    # 12-factor split. Derivable fields (entity_url, entity_type,
-    # webhook_host, price, entity_name) also stay out:
-    #
-    #   - entity_name is a slugified version of `name`; runtime computes
-    #     it via _slugify_name(config["name"]) and the user can still
-    #     override by adding an explicit "entity_name" field to the JSON
-    #     if they want a custom ZNS handle that isn't the auto-slug.
+    # Minimal canonical schema. Deploy-config (keypair_path,
+    # registry_url) lives in .env. Derivable fields (entity_url,
+    # entity_type, webhook_host, price, entity_name) stay out —
+    # entity_name is slugified from `name` at runtime and can still be
+    # overridden by adding an explicit "entity_name" key.
     config = {
         "name": name,
         "description": description,
@@ -174,7 +158,6 @@ def _service_init(args: argparse.Namespace):
     with open("service.config.json", "w") as f:
         json.dump(config, f, indent=2)
 
-    # Write .env
     env_lines = [
         f'ZYND_SERVICE_KEYPAIR_PATH="{kp_path}"',
         f'ZYND_REGISTRY_URL="{registry_url}"',
@@ -182,7 +165,6 @@ def _service_init(args: argparse.Namespace):
     with open(".env", "w") as f:
         f.write("\n".join(env_lines) + "\n")
 
-    # Write service.py from template
     tpl_dir = Path(__file__).parent.parent / "templates"
     tpl_path = tpl_dir / "service.py.tpl"
     if tpl_path.exists():
@@ -190,7 +172,6 @@ def _service_init(args: argparse.Namespace):
         with open("service.py", "w") as f:
             f.write(content)
 
-    # Create .well-known directory with placeholder (auto-generated at runtime)
     well_known = Path(".well-known")
     well_known.mkdir(exist_ok=True)
     with open(well_known / "agent.json", "w") as f:
@@ -219,181 +200,5 @@ def _service_init(args: argparse.Namespace):
 
 
 def _service_run(args: argparse.Namespace):
-    """Start the service, health-check it, upsert on the registry, and keep running."""
-    import subprocess
-    import time
-    import requests as _req
-
-    # Pull .env into os.environ so ZYND_SERVICE_KEYPAIR_PATH and
-    # ZYND_REGISTRY_URL are available. load_dotenv() doesn't override
-    # already-set env vars, so anything exported in the shell wins.
-    # load_dotenv() with no args walks up from the *calling file* (the
-    # installed package path), not the user's cwd — so it never finds the
-    # project's .env. Point it explicitly at ./.env in the current dir.
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(dotenv_path=Path.cwd() / ".env")
-    except ImportError:
-        pass
-
-    config_path = args.config
-    if not os.path.exists(config_path):
-        print(f"Error: {config_path} not found.", file=sys.stderr)
-        sys.exit(1)
-
-    script_file = "service.py"
-    if not os.path.exists(script_file):
-        print(f"Error: {script_file} not found in current directory.", file=sys.stderr)
-        sys.exit(1)
-
-    with open(config_path) as f:
-        config = json.load(f)
-
-    # Keypair path comes from ZYND_SERVICE_KEYPAIR_PATH in .env (canonical
-    # location as of the config-minimization pass). Fall back to the
-    # legacy config.json location for backward compat.
-    kp_path = os.environ.get("ZYND_SERVICE_KEYPAIR_PATH") or config.get("keypair_path")
-    if not kp_path:
-        print(
-            "Error: service keypair path not set. Export ZYND_SERVICE_KEYPAIR_PATH "
-            "or add it to .env in the current directory.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    if not os.path.exists(kp_path):
-        print(f"Error: service keypair not found at {kp_path}", file=sys.stderr)
-        sys.exit(1)
-
-    kp, meta = load_keypair_with_metadata(kp_path)
-    service_id = generate_entity_id(kp.public_key_bytes, "service")
-    # get_registry_url already walks CLI flag → ZYND_REGISTRY_URL → ~/.zynd/config.json → default
-    registry_url = get_registry_url(getattr(args, "registry", None))
-    port = args.port or config.get("webhook_port", 5000)
-    health_url = f"http://localhost:{port}/health"
-
-    # entity_url is derived — it's not a first-class config field. Precedence:
-    #   1. service_endpoint (config override, intended for distinct API hosts)
-    #   2. http://localhost:<webhook_port> (the default local bind)
-    # If you're running behind ngrok/proxy, set service_endpoint in the
-    # config and both entity_url and service_endpoint will point at it.
-    service_endpoint = config.get("service_endpoint")
-    entity_url = service_endpoint or f"http://localhost:{port}"
-
-    dev_path = developer_key_path()
-    if not dev_path.exists():
-        print("Error: Developer keypair not found.", file=sys.stderr)
-        sys.exit(1)
-
-    dev_kp = load_keypair(str(dev_path))
-    dev_id = generate_developer_id(dev_kp.public_key_bytes)
-    derived = (meta or {}).get("derived_from", {})
-    entity_index = derived.get("index", config.get("entity_index", 0))
-    proof = create_derivation_proof(dev_kp, kp.public_key, entity_index)
-    # entity_name is either an explicit override in config.json (rare) or
-    # slugified on the fly from the display name (the common case).
-    entity_name_zns = config.get("entity_name") or _slugify_name(config.get("name", ""))
-
-    from rich.console import Console
-    console = Console()
-
-    # --- Step 1: Start the service as a background process ---
-    console.print()
-    console.print(f"  [bold #8B5CF6]▶[/bold #8B5CF6] Starting [bold]{config.get('name', 'service')}[/bold]...")
-
-    env = os.environ.copy()
-    env["ZYND_SERVICE_KEYPAIR_PATH"] = kp_path
-    env["ZYND_REGISTRY_URL"] = registry_url
-    if args.port:
-        env["ZYND_WEBHOOK_PORT"] = str(args.port)
-
-    proc = subprocess.Popen(
-        [sys.executable, script_file],
-        env=env,
-        stdout=None,
-        stderr=None,
-    )
-
-    # --- Step 2: Health-check ---
-    console.print(f"  [dim]Waiting for service to start (health: {health_url})...[/dim]")
-    healthy = False
-    for _ in range(30):
-        if proc.poll() is not None:
-            console.print(f"  [bold red]✗[/bold red] Service process exited with code {proc.returncode}")
-            sys.exit(1)
-        try:
-            resp = _req.get(health_url, timeout=1)
-            if resp.status_code == 200:
-                healthy = True
-                break
-        except _req.ConnectionError:
-            pass
-        time.sleep(0.5)
-
-    if not healthy:
-        console.print(f"  [bold red]✗[/bold red] Service did not become healthy within 15s")
-        proc.terminate()
-        sys.exit(1)
-
-    console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Service is healthy")
-
-    # --- Step 3: Upsert on registry ---
-    existing = get_entity(registry_url, service_id, entity_type="service")
-
-    if existing is not None:
-        console.print(f"  [dim]Service already registered — updating...[/dim]")
-        update_body = {
-            "name": config["name"],
-            "category": config.get("category", "general"),
-            "tags": config.get("tags", []),
-            "summary": config.get("summary", ""),
-        }
-        success = update_entity(
-            registry_url, service_id, kp, update_body, entity_type="service"
-        )
-        if success:
-            fqan = get_entity_fqan(registry_url, service_id)
-            console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Service updated on registry")
-            if fqan:
-                console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
-        else:
-            console.print(f"  [bold red]✗[/bold red] Update failed")
-    else:
-        try:
-            service_id = register_entity(
-                registry_url=registry_url,
-                keypair=kp,
-                name=config["name"],
-                entity_url=entity_url,
-                category=config.get("category", "general"),
-                tags=config.get("tags", []),
-                summary=config.get("summary", ""),
-                developer_id=dev_id,
-                developer_proof=proof,
-                entity_name=entity_name_zns,
-                entity_type="service",
-                service_endpoint=service_endpoint,
-                openapi_url=config.get("openapi_url"),
-                entity_pricing=config.get("entity_pricing"),
-            )
-            fqan = get_entity_fqan(registry_url, service_id)
-            console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Service registered: {service_id}")
-            if fqan:
-                console.print(f"  [dim]FQAN:[/dim]     [bold #F59E0B]{fqan}[/bold #F59E0B]")
-            if entity_name_zns:
-                console.print(f"  [dim]ZNS Name:[/dim] {entity_name_zns}")
-        except Exception as e:
-            console.print(f"  [bold red]✗[/bold red] Registration failed: {e}")
-
-    # --- Step 4: Keep the service running ---
-    console.print()
-    console.print(f"  [bold green]Service is running.[/bold green] Press Ctrl+C to stop.")
-    console.print()
-    try:
-        proc.wait()
-    except KeyboardInterrupt:
-        console.print(f"\n  [dim]Stopping service...[/dim]")
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+    """Delegate to the shared EntityRunner base class."""
+    ServiceRunner().run(args)
