@@ -277,9 +277,12 @@ def _agent_run(args: argparse.Namespace):
     # child agent.py subprocess. load_dotenv() by default doesn't override
     # already-set env vars, so anything the user exported in their shell
     # still wins.
+    # load_dotenv() with no args walks up from the *calling file* (the
+    # installed package path), not the user's cwd — so it never finds the
+    # project's .env. Point it explicitly at ./.env in the current dir.
     try:
         from dotenv import load_dotenv
-        load_dotenv()
+        load_dotenv(dotenv_path=Path.cwd() / ".env")
     except ImportError:
         pass
 

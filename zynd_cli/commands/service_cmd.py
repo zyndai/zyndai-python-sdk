@@ -227,9 +227,12 @@ def _service_run(args: argparse.Namespace):
     # Pull .env into os.environ so ZYND_SERVICE_KEYPAIR_PATH and
     # ZYND_REGISTRY_URL are available. load_dotenv() doesn't override
     # already-set env vars, so anything exported in the shell wins.
+    # load_dotenv() with no args walks up from the *calling file* (the
+    # installed package path), not the user's cwd — so it never finds the
+    # project's .env. Point it explicitly at ./.env in the current dir.
     try:
         from dotenv import load_dotenv
-        load_dotenv()
+        load_dotenv(dotenv_path=Path.cwd() / ".env")
     except ImportError:
         pass
 
