@@ -4,8 +4,27 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
+
+
+def _slugify_name(name: str) -> str:
+    """Convert a free-form display name to a ZNS-safe slug.
+
+    Same rules as service_cmd._slugify_name — lowercase, spaces/
+    underscores → hyphens, drop non-alphanumeric, collapse repeated
+    hyphens, trim ends. Kept as a local helper (instead of a shared
+    module) to avoid a circular-import hazard between the two command
+    modules.
+    """
+    slug = re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-").replace("_", "-"))
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    if len(slug) < 3:
+        slug = slug + "-agent"
+    if len(slug) > 36:
+        slug = slug[:36]
+    return slug
 
 from zyndai_agent.ed25519_identity import (
     load_keypair,
@@ -156,31 +175,30 @@ def _agent_init(args: argparse.Namespace):
             console.print("  [dim]Aborted.[/dim]")
             return
 
-    # 5b. Derive entity_name (ZNS identifier) from the agent name
-    import re
-    entity_name_zns = re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-").replace("_", "-"))
-    entity_name_zns = re.sub(r"-+", "-", entity_name_zns).strip("-")
-    if len(entity_name_zns) < 3:
-        entity_name_zns = entity_name_zns + "-agent"
+    # 5b. Derive the ZNS identifier (slug form) from the agent name. We
+    # compute it here only to PREVIEW it to the user during init so they
+    # can see what FQAN their agent will bind to — it is NOT stored in
+    # the config file. At runtime, _agent_run re-derives the slug from
+    # config["name"] via the same helper, and operators can override it
+    # by adding an explicit "entity_name" key to the config (rare path
+    # for when the display name should differ from the ZNS handle).
+    entity_name_zns = _slugify_name(name)
 
     console.print(f"  [bold #8B5CF6]\u2713[/bold #8B5CF6] Agent name (ZNS): [bold]{entity_name_zns}[/bold]")
 
     # 6. Create agent.config.json with a minimal canonical schema.
     #
     # Deploy-config (keypair_path, registry_url) lives in .env only —
-    # those are environment-specific paths/URLs and shouldn't be baked
-    # into the per-project config file. The runtime reads them from
-    # os.environ with load_dotenv() pulling them out of .env at startup.
-    # This is the 12-factor split: semantic/code config in config.json,
-    # environment-specific values in .env.
+    # 12-factor split. Derivable fields (entity_url, entity_type,
+    # webhook_host, price, entity_name) also stay out:
     #
-    # Everything else that's derivable (entity_url, entity_type,
-    # webhook_host, price) stays out of the file too — see previous
-    # minimization pass in commit 4c691c5.
+    #   - entity_name is a slugified version of `name`; runtime computes
+    #     it via _slugify_name(config["name"]) and the user can still
+    #     override by adding an explicit "entity_name" field to the JSON
+    #     if they want a custom ZNS handle that isn't the auto-slug.
     registry_url = get_registry_url(getattr(args, "registry", None))
     config = {
         "name": name,
-        "entity_name": entity_name_zns,
         "framework": framework,
         "description": f"{name} agent",
         "category": "general",
@@ -357,7 +375,9 @@ def _agent_run(args: argparse.Namespace):
     console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] Agent is healthy")
 
     # --- Step 3: Check name availability ---
-    entity_name_zns = config.get("entity_name")
+    # entity_name is either an explicit override in config.json (rare) or
+    # slugified on the fly from the display name (the common case).
+    entity_name_zns = config.get("entity_name") or _slugify_name(config.get("name", ""))
     if entity_name_zns:
         try:
             dev_resp = _req.get(f"{registry_url}/v1/developers/{dev_id}")

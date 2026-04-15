@@ -64,15 +64,22 @@ def _service_help(args):
     print("  run    Start the service, register/update it on the network, and run")
 
 
-def _to_zns_name(name: str) -> str:
-    """Convert a display name to a ZNS-safe name with svc: prefix."""
-    slug = re.sub(r"[^a-z0-9-]", "-", name.lower().strip())
+def _slugify_name(name: str) -> str:
+    """Convert a free-form display name to a ZNS-safe slug.
+
+    Lowercase, spaces/underscores → hyphens, drop anything that isn't
+    alphanumeric or a hyphen, collapse repeated hyphens, trim the ends.
+    Intentionally does NOT prefix services with "svc:" — entity_type on
+    the registration payload already discriminates agents from services,
+    so adding a prefix on the ZNS handle was redundant noise.
+    """
+    slug = re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-").replace("_", "-"))
     slug = re.sub(r"-+", "-", slug).strip("-")
     if len(slug) < 3:
         slug = slug + "-service"
     if len(slug) > 36:
         slug = slug[:36]
-    return f"svc:{slug}"
+    return slug
 
 
 def _service_init(args: argparse.Namespace):
@@ -100,7 +107,7 @@ def _service_init(args: argparse.Namespace):
         print("Error: Service name is required.", file=sys.stderr)
         sys.exit(1)
 
-    entity_name_zns = _to_zns_name(name)
+    entity_name_zns = _slugify_name(name)
 
     # Determine derivation index
     if args.index is not None:
@@ -145,14 +152,15 @@ def _service_init(args: argparse.Namespace):
     # Write service.config.json with a minimal canonical schema.
     #
     # Deploy-config (keypair_path, registry_url) lives in .env only —
-    # environment-specific paths/URLs shouldn't be baked into the per-
-    # project config file. 12-factor split: code config in config.json,
-    # environment-specific values in .env. Derivable fields (entity_url,
-    # entity_type, webhook_host, price) also stay out — see commit
-    # 4c691c5 for the full rationale.
+    # 12-factor split. Derivable fields (entity_url, entity_type,
+    # webhook_host, price, entity_name) also stay out:
+    #
+    #   - entity_name is a slugified version of `name`; runtime computes
+    #     it via _slugify_name(config["name"]) and the user can still
+    #     override by adding an explicit "entity_name" field to the JSON
+    #     if they want a custom ZNS handle that isn't the auto-slug.
     config = {
         "name": name,
-        "entity_name": entity_name_zns,
         "description": description,
         "category": category,
         "tags": [],
@@ -278,7 +286,9 @@ def _service_run(args: argparse.Namespace):
     derived = (meta or {}).get("derived_from", {})
     entity_index = derived.get("index", config.get("entity_index", 0))
     proof = create_derivation_proof(dev_kp, kp.public_key, entity_index)
-    entity_name_zns = config.get("entity_name", "")
+    # entity_name is either an explicit override in config.json (rare) or
+    # slugified on the fly from the display name (the common case).
+    entity_name_zns = config.get("entity_name") or _slugify_name(config.get("name", ""))
 
     from rich.console import Console
     console = Console()
