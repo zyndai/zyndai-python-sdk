@@ -184,7 +184,7 @@ def get_service_tools(
     """
     from zyndai_agent import dns_registry
 
-    result = dns_registry.search_agents(
+    result = dns_registry.search_entities(
         registry_url=registry_url,
         query=keyword or "service",
         entity_type="service",

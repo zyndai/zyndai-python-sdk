@@ -25,7 +25,7 @@ from zynd_cli.config import (
 def register_parser(subparsers: argparse._SubParsersAction, parents=None):
     p = subparsers.add_parser("register", help="Register an agent on the registry", parents=parents or [])
     p.add_argument("--name", help="Agent display name")
-    p.add_argument("--agent-url", help="Agent base URL")
+    p.add_argument("--agent-url", dest="entity_url", help="Agent base URL")
     p.add_argument("--category", default="general", help="Agent category (default: general)")
     p.add_argument("--tags", nargs="*", help="Agent tags")
     p.add_argument("--summary", help="Agent summary")

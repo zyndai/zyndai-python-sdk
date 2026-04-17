@@ -87,7 +87,7 @@ async def fan_out(
 
             try:
                 agents_found = await asyncio.to_thread(
-                    agent.search_agents, keyword=capability, limit=3
+                    agent.search_entities, keyword=capability, limit=3
                 )
             except Exception as e:
                 task.mark_failed(f"Registry search failed: {e}")

@@ -241,9 +241,6 @@ def update_entity(
     except requests.RequestException as e:
         logger.error(f"Request failed: {e}")
         return False
-    except requests.RequestException as e:
-        logger.error(f"Request failed: {e}")
-        return False
 
 
 def delete_entity(
