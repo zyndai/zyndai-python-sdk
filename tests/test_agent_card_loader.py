@@ -12,8 +12,8 @@ from zyndai_agent.ed25519_identity import (
     save_keypair,
     load_keypair_with_metadata,
 )
-from zyndai_agent.agent_card_loader import (
-    load_agent_card,
+from zyndai_agent.entity_card_loader import (
+    load_entity_card,
     resolve_keypair,
     build_runtime_card,
     compute_card_hash,
@@ -56,28 +56,28 @@ class TestLoadAgentCard:
         card_path = tmp_path / "agent.json"
         card_path.write_text(json.dumps(SAMPLE_CARD))
 
-        card = load_agent_card(str(card_path))
+        card = load_entity_card(str(card_path))
         assert card["name"] == "Test Agent"
         assert card["category"] == "test"
         assert len(card["capabilities"]) == 2
 
     def test_load_missing_file(self):
         with pytest.raises(FileNotFoundError):
-            load_agent_card("/nonexistent/path/agent.json")
+            load_entity_card("/nonexistent/path/agent.json")
 
     def test_load_card_missing_name(self, tmp_path):
         card_path = tmp_path / "agent.json"
         card_path.write_text(json.dumps({"description": "no name"}))
 
         with pytest.raises(ValueError, match="must have a 'name' field"):
-            load_agent_card(str(card_path))
+            load_entity_card(str(card_path))
 
     def test_load_card_invalid_json_type(self, tmp_path):
         card_path = tmp_path / "agent.json"
         card_path.write_text(json.dumps([1, 2, 3]))
 
         with pytest.raises(ValueError, match="must be a JSON object"):
-            load_agent_card(str(card_path))
+            load_entity_card(str(card_path))
 
 
 class TestResolveKeypair:
@@ -141,7 +141,7 @@ class TestBuildRuntimeCard:
         kp = generate_keypair()
         runtime = build_runtime_card(SAMPLE_CARD, "http://localhost:5003", kp)
 
-        assert runtime["agent_id"] == kp.agent_id
+        assert runtime["entity_id"] == kp.entity_id
         assert runtime["public_key"] == kp.public_key_string
         assert runtime["name"] == "Test Agent"
         assert runtime["status"] == "online"
@@ -177,7 +177,7 @@ class TestComputeCardHash:
         assert compute_card_hash(SAMPLE_CARD) != compute_card_hash(card2)
 
     def test_ignores_non_metadata_fields(self):
-        card_with_extra = dict(SAMPLE_CARD, agent_id="xxx", status="offline")
+        card_with_extra = dict(SAMPLE_CARD, entity_id="xxx", status="offline")
         assert compute_card_hash(SAMPLE_CARD) == compute_card_hash(card_with_extra)
 
 

@@ -66,9 +66,9 @@ class Ed25519Keypair:
         return f"ed25519:{self.public_key_b64}"
 
     @property
-    def agent_id(self) -> str:
-        """Derive agent ID from public key."""
-        return generate_agent_id(self.public_key_bytes)
+    def entity_id(self) -> str:
+        """Derive the agent-flavor entity ID (zns:<hash>) from this keypair's public key."""
+        return generate_entity_id(self.public_key_bytes, "agent")
 
 
 def generate_keypair() -> Ed25519Keypair:
@@ -125,22 +125,20 @@ def save_keypair(kp: Ed25519Keypair, path: str, derivation_metadata: Optional[di
         json.dump(data, f, indent=2)
 
 
-def generate_agent_id(public_key_bytes: bytes) -> str:
+def generate_entity_id(public_key_bytes: bytes, entity_type: str = "agent") -> str:
     """
-    Generate agent ID from public key bytes.
-    Format: zns:<sha256(pub)[:16].hex()>
+    Derive an entity_id from Ed25519 public key bytes.
+
+    entity_type="agent"   → "zns:<hex>"        (agent-flavor)
+    entity_type="service" → "zns:svc:<hex>"    (service-flavor)
+    Anything else falls back to agent-flavor. Matches Go
+    models.GenerateEntityID byte-for-byte.
     """
     digest = hashlib.sha256(public_key_bytes).digest()
-    return "zns:" + digest[:16].hex()
-
-
-def generate_service_id(public_key_bytes: bytes) -> str:
-    """
-    Generate service ID from public key bytes.
-    Format: zns:svc:<sha256(pub)[:16].hex()>
-    """
-    digest = hashlib.sha256(public_key_bytes).digest()
-    return "zns:svc:" + digest[:16].hex()
+    suffix = digest[:16].hex()
+    if entity_type == "service":
+        return "zns:svc:" + suffix
+    return "zns:" + suffix
 
 
 def generate_developer_id(public_key_bytes: bytes) -> str:
@@ -245,7 +243,7 @@ def create_derivation_proof(
 
     return {
         "developer_public_key": dev_kp.public_key_string,
-        "agent_index": index,
+        "entity_index": index,
         "developer_signature": signature,
     }
 
@@ -256,7 +254,7 @@ def verify_derivation_proof(proof: dict, agent_pub_b64: str) -> bool:
     Matches Go identity.go:VerifyDerivationProof.
     """
     agent_pub_bytes = base64.b64decode(agent_pub_b64)
-    index = proof.get("agent_index", proof.get("index", 0))
+    index = proof.get("entity_index", proof.get("index", 0))
     message = _build_proof_message(agent_pub_bytes, index)
 
     dev_pub = proof["developer_public_key"]

@@ -20,7 +20,7 @@ from zyndai_agent.identity import IdentityManager
 from zyndai_agent.webhook_communication import WebhookCommunicationManager
 from zyndai_agent.payment import X402PaymentProcessor
 from zyndai_agent.ed25519_identity import Ed25519Keypair
-from zyndai_agent.agent_card_loader import (
+from zyndai_agent.entity_card_loader import (
     resolve_keypair,
     build_runtime_card,
     resolve_card_from_config,
@@ -77,6 +77,7 @@ class ZyndBaseConfig(BaseModel):
 
     # Pricing
     price: Optional[str] = None
+    entity_pricing: Optional[dict] = None
 
     # Identity
     keypair_path: Optional[str] = None
@@ -112,7 +113,12 @@ class ZyndBase(
                 "or provide keypair_path in config."
             )
 
-        self.agent_id = self.keypair.agent_id
+        # Canonical entity ID (agent-flavor "zns:<hash>" or service-flavor "zns:svc:<hash>").
+        if self._entity_type == "service":
+            from zyndai_agent.ed25519_identity import generate_entity_id
+            self.entity_id = generate_entity_id(self.keypair.public_key_bytes, "service")
+        else:
+            self.entity_id = self.keypair.entity_id
 
         # x402 payment
         self.x402_processor = X402PaymentProcessor(
@@ -133,15 +139,32 @@ class ZyndBase(
             base_url = self._get_base_url()
             card = build_runtime_card(self._static_card, base_url, self.keypair)
             if self._entity_type == "service":
-                card["type"] = "service"
+                card["entity_type"] = "service"
             return card
 
         self._build_card = _build_card
 
+        # Derive the x402 runtime price string from structured entity_pricing
+        # if the operator only filled in the registry-facing field. Contract:
+        #   - If price is already set, use it verbatim (operator override wins).
+        #   - Else if entity_pricing has a positive base_price_usd, format it
+        #     as "${amount} {currency}" so WebhookCommunicationManager can
+        #     charge per call via x402.
+        #   - Else leave it unset (free service).
+        # This exists so users can specify pricing ONCE in config.json under
+        # entity_pricing and have both the registry registration AND runtime
+        # charging pick it up automatically.
+        runtime_price = config.price
+        if not runtime_price and config.entity_pricing:
+            base = config.entity_pricing.get("base_price_usd")
+            if isinstance(base, (int, float)) and base > 0:
+                currency = config.entity_pricing.get("currency") or "USDC"
+                runtime_price = f"${base} {currency}"
+
         # Start webhook server
         WebhookCommunicationManager.__init__(
             self,
-            agent_id=self.agent_id,
+            entity_id=self.entity_id,
             webhook_host=config.webhook_host,
             webhook_port=config.webhook_port,
             webhook_url=config.webhook_url,
@@ -150,7 +173,7 @@ class ZyndBase(
             identity_credential=None,
             keypair=self.keypair,
             agent_card_builder=_build_card,
-            price=config.price,
+            price=runtime_price,
             pay_to_address=self.pay_to_address,
             use_ngrok=config.use_ngrok,
             ngrok_auth_token=config.ngrok_auth_token or os.environ.get("NGROK_AUTH_TOKEN"),
@@ -204,11 +227,20 @@ class ZyndBase(
 
     def _start_heartbeat(self, registry_url: str):
         """Start background thread sending WebSocket heartbeats to registry."""
+        debug = os.environ.get("ZYND_HEARTBEAT_DEBUG", "").lower() in ("1", "true", "yes")
+
         def _heartbeat_loop():
             from zyndai_agent.ed25519_identity import sign as ed25519_sign
 
             ws_url = registry_url.replace("https://", "wss://").replace("http://", "ws://")
-            ws_url = f"{ws_url}/v1/agents/{self.agent_id}/ws"
+            ws_url = f"{ws_url}/v1/entities/{self.entity_id}/ws"
+            diag_url = ws_url.replace("wss://", "https://").replace("ws://", "http://")
+
+            if debug:
+                _log_heartbeat(f"DEBUG entity_id={self.entity_id}")
+                _log_heartbeat(f"DEBUG entity_type={self._entity_type}")
+                _log_heartbeat(f"DEBUG registry_url={registry_url}")
+                _log_heartbeat(f"DEBUG ws_url={ws_url}")
 
             while not self._heartbeat_stop.is_set():
                 try:
@@ -233,7 +265,7 @@ class ZyndBase(
                     _log_warn("Heartbeat: websockets not installed. pip install websockets")
                     return
                 except Exception as e:
-                    _log_heartbeat(f"Connection lost: {e} — reconnecting in 5s")
+                    self._log_heartbeat_failure(e, ws_url, diag_url)
                     for _ in range(5):
                         if self._heartbeat_stop.is_set():
                             return
@@ -242,9 +274,101 @@ class ZyndBase(
         self._heartbeat_thread = threading.Thread(
             target=_heartbeat_loop,
             daemon=True,
-            name=f"Heartbeat-{self.agent_id}",
+            name=f"Heartbeat-{self.entity_id}",
         )
         self._heartbeat_thread.start()
+
+    def _log_heartbeat_failure(self, exc: Exception, ws_url: str, diag_url: str):
+        """Emit a detailed diagnostic when the WS heartbeat upgrade is rejected.
+
+        By default emits a single compact line per failure that includes
+        the exception class, HTTP status (if known), and a short body
+        preview (first 100 chars, stripped). This is enough to tell the
+        operator what went wrong without burying their terminal in header
+        dumps every 5 seconds during a reconnect loop.
+
+        Set ZYND_HEARTBEAT_DEBUG=1 in the environment to get the full
+        verbose dump instead (status code + all response headers + full
+        body + a fallback plain-GET diagnostic on the same URL). Intended
+        for debugging weird upgrade failures where you need to see exactly
+        what the proxy / Gorilla upgrader is sending back.
+        """
+        exc_class = type(exc).__name__
+        debug = os.environ.get("ZYND_HEARTBEAT_DEBUG", "").lower() in ("1", "true", "yes")
+
+        # Pull status + headers + body out of whichever exception shape the
+        # websockets library uses (InvalidStatus in >=13, InvalidStatusCode
+        # in <13). Both may be None if the failure was e.g. a network error.
+        status_code = None
+        resp_headers = None
+        resp_body = None
+
+        response = getattr(exc, "response", None)
+        if response is not None:
+            status_code = getattr(response, "status_code", None)
+            resp_headers = getattr(response, "headers", None)
+            resp_body = getattr(response, "body", None)
+        if status_code is None:
+            status_code = getattr(exc, "status_code", None)
+        if resp_headers is None:
+            resp_headers = getattr(exc, "headers", None)
+
+        # Decode body to a string once for reuse in both the terse and
+        # verbose paths below.
+        body_str = ""
+        if resp_body:
+            try:
+                body_str = (
+                    resp_body.decode("utf-8", errors="replace")
+                    if isinstance(resp_body, (bytes, bytearray))
+                    else str(resp_body)
+                )
+            except Exception:
+                body_str = repr(resp_body)
+
+        if not debug:
+            # Terse single-line form. Examples:
+            #   ♥ Connection lost [InvalidStatus HTTP 404]: {"error":"entity not found"} — reconnecting in 5s
+            #   ♥ Connection lost [InvalidStatus HTTP 400]: Bad Request — reconnecting in 5s
+            #   ♥ Connection lost [ConnectionError]: [Errno 111] Connection refused — reconnecting in 5s
+            tag = exc_class
+            if status_code is not None:
+                tag = f"{exc_class} HTTP {status_code}"
+            detail = body_str.strip().replace("\n", " ")[:100] if body_str else str(exc)
+            _log_heartbeat(f"Connection lost [{tag}]: {detail} — reconnecting in 5s")
+            return
+
+        # Verbose form (ZYND_HEARTBEAT_DEBUG=1).
+        _log_heartbeat(f"Connection lost [{exc_class}]: {exc} — reconnecting in 5s")
+        if status_code is not None:
+            _log_heartbeat(f"  HTTP status: {status_code}")
+        if resp_headers is not None:
+            try:
+                items = (
+                    resp_headers.raw_items() if hasattr(resp_headers, "raw_items")
+                    else list(resp_headers.items())
+                )
+                for k, v in items:
+                    _log_heartbeat(f"  < {k}: {v}")
+            except Exception:
+                _log_heartbeat(f"  (headers: {resp_headers!r})")
+        if body_str:
+            _log_heartbeat(f"  body: {body_str[:500]}")
+
+        # Fallback plain GET on the same URL reveals Gorilla's upgrade
+        # error body when the websockets lib swallows it.
+        try:
+            import requests as _req
+            _log_heartbeat(f"  diag GET {diag_url}")
+            diag = _req.get(diag_url, timeout=10, allow_redirects=False)
+            _log_heartbeat(f"    status: {diag.status_code}")
+            for k, v in diag.headers.items():
+                _log_heartbeat(f"    < {k}: {v}")
+            body_preview = (diag.text or "").strip()[:500]
+            if body_preview:
+                _log_heartbeat(f"    body: {body_preview}")
+        except Exception as diag_err:
+            _log_heartbeat(f"  diag GET failed: {diag_err}")
 
     def stop_heartbeat(self):
         """Stop the heartbeat background thread."""
@@ -256,15 +380,24 @@ class ZyndBase(
     def _display_info(self):
         """Display entity info on startup."""
         name = self._config.name or "Unnamed"
-        agent_id = self.agent_id
+        entity_id = self.entity_id
         webhook_url = getattr(self, "webhook_url", None)
-        price = self._config.price or "Free"
+        # Mirror the runtime price resolution: prefer the explicit price
+        # string, fall back to formatting entity_pricing, then "Free".
+        price = self._config.price
+        if not price and self._config.entity_pricing:
+            base = self._config.entity_pricing.get("base_price_usd")
+            if isinstance(base, (int, float)) and base > 0:
+                currency = self._config.entity_pricing.get("currency") or "USDC"
+                price = f"${base} {currency}"
+        if not price:
+            price = "Free"
         pub_key = self.keypair.public_key_string if self.keypair else "-"
         address = self.pay_to_address
 
         fqan = None
         try:
-            fqan = dns_registry.get_agent_fqan(self._config.registry_url, agent_id)
+            fqan = dns_registry.get_entity_fqan(self._config.registry_url, entity_id)
         except Exception:
             pass
 
@@ -277,7 +410,7 @@ class ZyndBase(
             _console.print(f"  [dim]Name[/dim]         [bold white]{name}[/bold white]")
             if self._config.description:
                 _console.print(f"  [dim]Description[/dim]  {self._config.description}")
-            _console.print(f"  [dim]ID[/dim]           [#06B6D4]{agent_id}[/#06B6D4]")
+            _console.print(f"  [dim]ID[/dim]           [#06B6D4]{entity_id}[/#06B6D4]")
             if fqan:
                 _console.print(f"  [dim]FQAN[/dim]         [bold #F59E0B]{fqan}[/bold #F59E0B]")
             _console.print(f"  [dim]Public Key[/dim]   [dim]{pub_key}[/dim]")
@@ -292,7 +425,7 @@ class ZyndBase(
         else:
             print(f"\n  {self._entity_label}")
             print(f"  Name        : {name}")
-            print(f"  ID          : {agent_id}")
+            print(f"  ID          : {entity_id}")
             if fqan:
                 print(f"  FQAN        : {fqan}")
             if webhook_url:

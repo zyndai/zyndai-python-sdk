@@ -3,7 +3,7 @@
 import argparse
 import json
 
-from zyndai_agent.dns_registry import search_agents
+from zyndai_agent.dns_registry import search_entities
 from zynd_cli.config import get_registry_url
 
 
@@ -33,7 +33,7 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
 def run(args: argparse.Namespace):
     registry_url = get_registry_url(getattr(args, "registry", None))
 
-    result = search_agents(
+    result = search_entities(
         registry_url=registry_url,
         query=args.query,
         category=args.category,
@@ -69,7 +69,7 @@ def run(args: argparse.Namespace):
 
     print(f"Found {total} agent(s):\n")
     for agent in agents:
-        agent_id = agent.get("agent_id", "?")
+        entity_id = agent.get("entity_id", "?")
         name = agent.get("name", "?")
         category = agent.get("category", "?")
         status = agent.get("status", "")
@@ -82,7 +82,7 @@ def run(args: argparse.Namespace):
         type_label = "[SERVICE]" if entity_type == "service" else "[AGENT]"
         status_label = f"  [{status}]" if status else ""
         print(f"  {type_label} {name}{status_label}")
-        print(f"    ID:       {agent_id}")
+        print(f"    ID:       {entity_id}")
         print(f"    Category: {category}")
         if tags:
             print(f"    Tags:     {', '.join(tags)}")

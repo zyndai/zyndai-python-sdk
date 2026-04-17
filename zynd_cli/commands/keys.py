@@ -64,7 +64,7 @@ def _list_keys():
     if dev.exists():
         kp = load_keypair(str(dev))
         print(f"  developer")
-        print(f"    Agent ID:   {kp.agent_id}")
+        print(f"    Agent ID:   {kp.entity_id}")
         print(f"    Public key: {kp.public_key_string}")
         print()
         found = True
@@ -77,7 +77,7 @@ def _list_keys():
                     kp = load_keypair(str(f))
                     name = f.stem
                     print(f"  {name}")
-                    print(f"    Agent ID:   {kp.agent_id}")
+                    print(f"    Agent ID:   {kp.entity_id}")
                     print(f"    Public key: {kp.public_key_string}")
                     print()
                     found = True
@@ -106,7 +106,7 @@ def _create_key(args: argparse.Namespace):
     save_keypair(kp, str(path))
 
     print(f"Keypair created: {path}")
-    print(f"  Agent ID:   {kp.agent_id}")
+    print(f"  Agent ID:   {kp.entity_id}")
     print(f"  Public key: {kp.public_key_string}")
 
 
@@ -127,7 +127,7 @@ def _derive_key(args: argparse.Namespace):
     })
 
     print(f"Derived keypair at index {args.index}: {path}")
-    print(f"  Agent ID:   {kp.agent_id}")
+    print(f"  Agent ID:   {kp.entity_id}")
     print(f"  Public key: {kp.public_key_string}")
 
 
@@ -146,7 +146,7 @@ def _show_key(args: argparse.Namespace):
     kp, metadata = load_keypair_with_metadata(str(path))
     print(f"Keypair: {name}")
     print(f"  File:       {path}")
-    print(f"  Agent ID:   {kp.agent_id}")
+    print(f"  Agent ID:   {kp.entity_id}")
     print(f"  Public key: {kp.public_key_string}")
     if metadata:
         print(f"  Derived from:")

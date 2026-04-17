@@ -49,6 +49,7 @@ if __name__ == "__main__":
             _config.get("keypair_path"),
         ),
         price=_config.get("price"),
+        entity_pricing=_config.get("entity_pricing"),
     )
 
     service = ZyndService(service_config=config)

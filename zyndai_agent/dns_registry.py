@@ -15,18 +15,18 @@ from zyndai_agent.ed25519_identity import Ed25519Keypair, sign
 logger = logging.getLogger(__name__)
 
 
-def register_agent(
+def register_entity(
     registry_url: str,
     keypair: Ed25519Keypair,
     name: str,
-    entity_url: str = "",
+    entity_url: str,
     category: str = "general",
     tags: Optional[List[str]] = None,
     summary: Optional[str] = None,
     capability_summary: Optional[dict] = None,
     developer_id: Optional[str] = None,
     developer_proof: Optional[dict] = None,
-    agent_name: Optional[str] = None,
+    entity_name: Optional[str] = None,
     version: Optional[str] = None,
     entity_type: Optional[str] = None,
     service_endpoint: Optional[str] = None,
@@ -36,15 +36,26 @@ def register_agent(
     """
     Register an agent or service on the registry.
 
-    Builds signable payload, signs with Ed25519 key, and POSTs to /v1/entities.
+    Builds signable payload, signs with Ed25519 key, and POSTs to /v1/agents
+    (or /v1/services for type=service).
 
     Returns:
         entity_id: The registered agent/service ID
     """
-    # Build signable payload (sorted keys to match Go's json.Marshal)
-    signable: dict = {
-        "category": category,
+    # Build signable payload. Must produce a byte sequence IDENTICAL to what
+    # the Go backend computes in handleRegisterEntity (server.go), which
+    # marshals a map[string]interface{} via json.Marshal:
+    #   - sort_keys=True           → Go json.Marshal sorts map keys alphabetically
+    #   - separators=(",", ":")    → Go json.Marshal has no whitespace
+    #   - ensure_ascii=False       → Go json.Marshal writes raw UTF-8 bytes
+    #                                for non-ASCII (em-dash, arrow, etc.);
+    #                                Python's default ensure_ascii=True would
+    #                                escape them to \uXXXX and produce a
+    #                                different byte sequence, leading to
+    #                                HTTP 401 "invalid agent signature".
+    signable = {
         "entity_url": entity_url or "",
+        "category": category,
         "name": name,
         "public_key": keypair.public_key_string,
         "summary": summary or "",
@@ -52,10 +63,13 @@ def register_agent(
     }
     if entity_type:
         signable["entity_type"] = entity_type
-    signable_bytes = json.dumps(signable, sort_keys=True, separators=(",", ":")).encode()
+    signable_bytes = json.dumps(
+        signable, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
     signature = sign(keypair.private_key, signable_bytes)
 
-    body: dict = {
+    # Build full registration request
+    body = {
         "name": name,
         "entity_url": entity_url or "",
         "category": category,
@@ -79,13 +93,15 @@ def register_agent(
         body["developer_id"] = developer_id
     if developer_proof:
         body["developer_proof"] = developer_proof
-    if agent_name:
-        body["agent_name"] = agent_name
+    if entity_name:
+        body["entity_name"] = entity_name
     if version:
         body["version"] = version
 
+    # Use unified /v1/entities endpoint
+    endpoint = "/v1/entities"
     resp = requests.post(
-        f"{registry_url}/v1/entities",
+        f"{registry_url}{endpoint}",
         json=body,
         headers={"Content-Type": "application/json"},
     )
@@ -97,7 +113,7 @@ def register_agent(
         )
 
     data = resp.json()
-    return data.get("entity_id", data.get("agent_id", keypair.agent_id))
+    return data.get("entity_id") or keypair.entity_id
 
 
 def check_handle_available(registry_url: str, handle: str) -> dict:
@@ -112,79 +128,97 @@ def check_handle_available(registry_url: str, handle: str) -> dict:
         resp = requests.get(f"{registry_url}/v1/handles/{handle}/available")
         if resp.status_code == 200:
             return resp.json()
-        return {"handle": handle, "available": False, "reason": f"HTTP {resp.status_code}"}
+        return {
+            "handle": handle,
+            "available": False,
+            "reason": f"HTTP {resp.status_code}",
+        }
     except requests.RequestException as e:
         return {"handle": handle, "available": False, "reason": str(e)}
 
 
-def check_agent_name_available(
-    registry_url: str, developer_handle: str, agent_name: str
+def check_entity_name_available(
+    registry_url: str, developer_handle: str, entity_name: str
 ) -> dict:
     """
-    Check if an agent name is available under a developer handle.
-    GET /v1/names/{developer}/{agent}/available
+    Check if an entity name is available under a developer handle.
+    GET /v1/names/{developer}/{entity}/available
 
     Returns:
-        dict with keys: developer, agent_name, available (bool), reason (optional),
-                        existing_agent_id (optional)
+        dict with keys: developer, entity_name, available (bool), reason (optional),
+                        existing_entity_id (optional)
     """
     try:
         resp = requests.get(
-            f"{registry_url}/v1/names/{developer_handle}/{agent_name}/available"
+            f"{registry_url}/v1/names/{developer_handle}/{entity_name}/available"
         )
         if resp.status_code == 200:
             return resp.json()
         return {
             "developer": developer_handle,
-            "agent_name": agent_name,
+            "entity_name": entity_name,
             "available": False,
             "reason": f"HTTP {resp.status_code}",
         }
     except requests.RequestException as e:
         return {
             "developer": developer_handle,
-            "agent_name": agent_name,
+            "entity_name": entity_name,
             "available": False,
             "reason": str(e),
         }
 
 
-def get_agent(registry_url: str, agent_id: str) -> Optional[dict]:
+def get_entity(
+    registry_url: str, entity_id: str, entity_type: Optional[str] = None
+) -> Optional[dict]:
     """
-    Look up an agent by ID.
-    GET /v1/agents/{agent_id}
+    Look up an entity by ID.
+    GET /v1/entities/{entity_id}
     """
+    label = entity_type or "entity"
     try:
-        resp = requests.get(f"{registry_url}/v1/entities/{agent_id}")
+        resp = requests.get(f"{registry_url}/v1/entities/{entity_id}")
         if resp.status_code == 200:
             return resp.json()
-        logger.error(f"Failed to get agent {agent_id}: {resp.status_code}")
+        logger.error(f"Failed to get {label} {entity_id}: {resp.status_code}")
         return None
     except requests.RequestException as e:
         logger.error(f"Request failed: {e}")
         return None
 
 
-def update_agent(
+def update_entity(
     registry_url: str,
-    agent_id: str,
+    entity_id: str,
     keypair: Ed25519Keypair,
     updates: dict,
+    entity_type: Optional[str] = None,
 ) -> bool:
     """
-    Update an agent's registration.
-    PUT /v1/agents/{agent_id} with Authorization: Bearer ed25519:<sig>
+    Update an entity's registration.
+    PUT /v1/entities/{entity_id} with Authorization: Bearer ed25519:<sig>
 
     The server verifies the Bearer signature against the request body bytes.
     Adds a body-level signature over the update fields, then signs the full
     body for the Authorization header.
     """
-    # Sign the update content (excluding signature field itself)
-    signable_bytes = json.dumps(updates, sort_keys=True, separators=(",", ":")).encode()
+    label = entity_type or "entity"
+    # Canonical JSON encoding must match Go's json.Marshal default output
+    # byte-for-byte — see register_entity() above for the full rationale.
+    # The critical bit is ensure_ascii=False so non-ASCII chars (em-dash,
+    # arrow, emoji, etc.) in the update body serialize as raw UTF-8 and not
+    # as Python's default \uXXXX escapes, which would make the Go verifier
+    # compute a different signature and return HTTP 401.
+    signable_bytes = json.dumps(
+        updates, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
     updates["signature"] = sign(keypair.private_key, signable_bytes)
 
     # Serialize full body (with signature) and sign for auth header
-    body_bytes = json.dumps(updates, sort_keys=True, separators=(",", ":")).encode()
+    body_bytes = json.dumps(
+        updates, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
     auth_sig = sign(keypair.private_key, body_bytes)
 
     headers = {
@@ -194,48 +228,55 @@ def update_agent(
 
     try:
         resp = requests.put(
-            f"{registry_url}/v1/entities/{agent_id}",
+            f"{registry_url}/v1/entities/{entity_id}",
             data=body_bytes,
             headers=headers,
         )
         if resp.status_code == 200:
             return True
-        logger.error(f"Failed to update agent {agent_id}: {resp.status_code} {resp.text}")
+        logger.error(
+            f"Failed to update {label} {entity_id}: {resp.status_code} {resp.text}"
+        )
+        return False
+    except requests.RequestException as e:
+        logger.error(f"Request failed: {e}")
         return False
     except requests.RequestException as e:
         logger.error(f"Request failed: {e}")
         return False
 
 
-def delete_agent(
+def delete_entity(
     registry_url: str,
-    agent_id: str,
+    entity_id: str,
     keypair: Ed25519Keypair,
+    entity_type: Optional[str] = None,
 ) -> bool:
     """
-    Delete an agent's registration.
-    DELETE /v1/agents/{agent_id} with Authorization: Bearer ed25519:<sig>
+    Delete an entity's registration.
+    DELETE /v1/entities/{entity_id} with Authorization: Bearer ed25519:<sig>
     """
-    auth_sig = sign(keypair.private_key, agent_id.encode())
+    label = entity_type or "entity"
+    auth_sig = sign(keypair.private_key, entity_id.encode())
     headers = {
         "Authorization": f"Bearer {auth_sig}",
     }
 
     try:
         resp = requests.delete(
-            f"{registry_url}/v1/entities/{agent_id}",
+            f"{registry_url}/v1/entities/{entity_id}",
             headers=headers,
         )
         if resp.status_code in (200, 204):
             return True
-        logger.error(f"Failed to delete agent {agent_id}: {resp.status_code}")
+        logger.error(f"Failed to delete {label} {entity_id}: {resp.status_code}")
         return False
     except requests.RequestException as e:
         logger.error(f"Request failed: {e}")
         return False
 
 
-def search_agents(
+def search_entities(
     registry_url: str,
     query: Optional[str] = None,
     category: Optional[str] = None,
@@ -333,16 +374,19 @@ def search_agents(
         return {"results": [], "total_found": 0, "has_more": False}
 
 
-def get_agent_card(registry_url: str, agent_id: str) -> Optional[dict]:
+def get_entity_card(
+    registry_url: str, entity_id: str, entity_type: Optional[str] = None
+) -> Optional[dict]:
     """
-    Fetch an agent's Agent Card.
-    GET /v1/agents/{agent_id}/card
+    Fetch an entity's Card.
+    GET /v1/entities/{entity_id}/card
     """
+    label = entity_type or "entity"
     try:
-        resp = requests.get(f"{registry_url}/v1/entities/{agent_id}/card")
+        resp = requests.get(f"{registry_url}/v1/entities/{entity_id}/card")
         if resp.status_code == 200:
             return resp.json()
-        logger.error(f"Failed to get agent card for {agent_id}: {resp.status_code}")
+        logger.error(f"Failed to get {label} card for {entity_id}: {resp.status_code}")
         return None
     except requests.RequestException as e:
         logger.error(f"Request failed: {e}")
@@ -402,7 +446,7 @@ def get_registry_info(registry_url: str) -> Optional[dict]:
         return None
 
 
-def get_agent_fqan(registry_url: str, agent_id: str) -> Optional[str]:
+def get_entity_fqan(registry_url: str, entity_id: str) -> Optional[str]:
     """
     Look up the FQAN (Fully Qualified Agent Name) for an agent.
     Checks if the agent has a ZNS name binding and returns the FQAN string
@@ -414,7 +458,7 @@ def get_agent_fqan(registry_url: str, agent_id: str) -> Optional[str]:
         # Search for the agent to get FQAN from search results
         resp = requests.post(
             f"{registry_url}/v1/search",
-            json={"query": agent_id, "max_results": 1, "enrich": False},
+            json={"query": entity_id, "max_results": 1, "enrich": False},
             headers={"Content-Type": "application/json"},
             timeout=5,
         )
@@ -422,7 +466,7 @@ def get_agent_fqan(registry_url: str, agent_id: str) -> Optional[str]:
             data = resp.json()
             results = data.get("results", [])
             for r in results:
-                if r.get("agent_id") == agent_id:
+                if r.get("entity_id") == entity_id:
                     fqan = r.get("fqan", "")
                     if fqan:
                         return fqan

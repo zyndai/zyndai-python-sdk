@@ -25,7 +25,7 @@ class TestSearchAgents:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "results": [
-                {"agent_id": "agdns:abc", "name": "StockAgent", "summary": "Analyzes stocks"},
+                {"entity_id": "agdns:abc", "name": "StockAgent", "summary": "Analyzes stocks"},
             ],
             "total_found": 1,
             "has_more": False,
@@ -33,7 +33,7 @@ class TestSearchAgents:
         mock_post.return_value = mock_response
 
         mgr = SearchAndDiscoveryManager()
-        results = mgr.search_agents(keyword="stock analysis")
+        results = mgr.search_entities(keyword="stock analysis")
 
         assert len(results) == 1
         assert results[0]["name"] == "StockAgent"
@@ -50,7 +50,7 @@ class TestSearchAgents:
         mock_post.return_value = mock_response
 
         mgr = SearchAndDiscoveryManager()
-        results = mgr.search_agents(keyword="nonexistent")
+        results = mgr.search_entities(keyword="nonexistent")
         assert results == []
 
     @patch("zyndai_agent.dns_registry.requests.post")
@@ -61,7 +61,7 @@ class TestSearchAgents:
         mock_post.return_value = mock_response
 
         mgr = SearchAndDiscoveryManager()
-        mgr.search_agents(
+        mgr.search_entities(
             keyword="nlp",
             category="ai",
             tags=["nlp"],
@@ -88,7 +88,7 @@ class TestSearchAgents:
         mock_post.return_value = mock_response
 
         mgr = SearchAndDiscoveryManager()
-        results = mgr.search_agents(keyword="test")
+        results = mgr.search_entities(keyword="test")
         assert results == []
 
     @patch("zyndai_agent.dns_registry.requests.post")
@@ -98,7 +98,7 @@ class TestSearchAgents:
         mock_post.side_effect = requests.RequestException("Connection refused")
 
         mgr = SearchAndDiscoveryManager()
-        results = mgr.search_agents(keyword="test")
+        results = mgr.search_entities(keyword="test")
         assert results == []
 
 
@@ -150,7 +150,7 @@ class TestSearchByKeyword:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "results": [{"agent_id": "agdns:1"}],
+            "results": [{"entity_id": "agdns:1"}],
             "total_found": 1,
             "has_more": False,
         }
@@ -170,12 +170,12 @@ class TestGetAgentById:
     def test_get_agent_success(self, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"agent_id": "agdns:abc", "name": "Agent"}
+        mock_response.json.return_value = {"entity_id": "agdns:abc", "name": "Agent"}
         mock_get.return_value = mock_response
 
         mgr = SearchAndDiscoveryManager()
         result = mgr.get_agent_by_id("agdns:abc")
-        assert result["agent_id"] == "agdns:abc"
+        assert result["entity_id"] == "agdns:abc"
         mock_get.assert_called_once_with("http://localhost:8080/v1/entities/agdns:abc")
 
     @patch("zyndai_agent.dns_registry.requests.get")
@@ -204,9 +204,9 @@ class TestGetAgentCard:
     def test_get_card(self, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"agent_id": "agdns:abc", "name": "Test"}
+        mock_response.json.return_value = {"entity_id": "agdns:abc", "name": "Test"}
         mock_get.return_value = mock_response
 
         mgr = SearchAndDiscoveryManager()
-        result = mgr.get_agent_card("agdns:abc")
+        result = mgr.get_entity_card("agdns:abc")
         assert result is not None

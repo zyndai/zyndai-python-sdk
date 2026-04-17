@@ -20,13 +20,13 @@ from zyndai_agent.ed25519_identity import (
     load_keypair_with_metadata,
     sign,
 )
-from zyndai_agent.agent_card import sign_agent_card, build_endpoints
+from zyndai_agent.entity_card import sign_entity_card, build_endpoints
 
 
 CARD_HASH_FIELDS = ("name", "description", "capabilities", "category", "tags", "pricing", "summary")
 
 
-def load_agent_card(path: str) -> dict:
+def load_entity_card(path: str) -> dict:
     """
     Read and validate an agent card JSON file.
 
@@ -116,7 +116,7 @@ def build_runtime_card(
     """
     Merge a static card (from file) with runtime fields to produce a serveable card.
 
-    Adds: agent_id, public_key, endpoints, status, timestamps, signature.
+    Adds: entity_id, public_key, endpoints, status, timestamps, signature.
     Strips: server, registry sections (SDK-internal).
 
     Args:
@@ -131,8 +131,8 @@ def build_runtime_card(
 
     card = {}
 
-    # Add runtime identity fields
-    card["agent_id"] = keypair.agent_id
+    # Add runtime identity fields.
+    card["entity_id"] = keypair.entity_id
     card["public_key"] = keypair.public_key_string
 
     # Copy metadata fields from static card
@@ -145,7 +145,7 @@ def build_runtime_card(
     card.setdefault("version", "1.0")
 
     # Build absolute endpoints
-    card["agent_url"] = base_url
+    card["entity_url"] = base_url
     card["endpoints"] = build_endpoints(base_url)
 
     # Runtime timestamps
@@ -154,7 +154,7 @@ def build_runtime_card(
     card["signed_at"] = now
 
     # Sign the card
-    return sign_agent_card(card, keypair)
+    return sign_entity_card(card, keypair)
 
 
 def compute_card_hash(card: dict) -> str:
@@ -221,20 +221,24 @@ def resolve_card_from_config(agent_config) -> dict:
     elif capabilities:
         card["capabilities"] = capabilities
 
-    # Convert price string to pricing dict
-    price = getattr(agent_config, "price", None)
-    if price:
-        amount = price.lstrip("$")
-        try:
-            rate = float(amount)
-        except ValueError:
-            rate = 0.0
-        card["pricing"] = {
-            "model": "per-request",
-            "currency": "USDC",
-            "rates": {"default": rate},
-            "payment_methods": ["x402"],
-        }
+    # Use entity_pricing from config if provided, otherwise derive from price string
+    entity_pricing = getattr(agent_config, "entity_pricing", None)
+    if entity_pricing and isinstance(entity_pricing, dict):
+        card["pricing"] = entity_pricing
+    else:
+        price = getattr(agent_config, "price", None)
+        if price:
+            amount = price.lstrip("$")
+            try:
+                rate = float(amount)
+            except ValueError:
+                rate = 0.0
+            card["pricing"] = {
+                "model": "per-request",
+                "currency": "USDC",
+                "rates": {"default": rate},
+                "payment_methods": ["x402"],
+            }
 
     # Add server section from config
     card["server"] = {

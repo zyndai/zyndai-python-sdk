@@ -9,9 +9,9 @@ from zyndai_agent.identity import IdentityManager
 from zyndai_agent.payment import X402PaymentProcessor
 from zyndai_agent.config_manager import ConfigManager
 from zyndai_agent.ed25519_identity import Ed25519Keypair, generate_keypair, keypair_from_private_bytes
-from zyndai_agent.agent_card import build_agent_card, sign_agent_card, build_endpoints
-from zyndai_agent.agent_card_loader import (
-    load_agent_card,
+from zyndai_agent.entity_card import build_entity_card, sign_entity_card, build_endpoints
+from zyndai_agent.entity_card_loader import (
+    load_entity_card,
     resolve_keypair,
     build_runtime_card,
     compute_card_hash,
@@ -64,10 +64,10 @@ __all__ = [
     "Ed25519Keypair",
     "generate_keypair",
     "keypair_from_private_bytes",
-    "build_agent_card",
-    "sign_agent_card",
+    "build_entity_card",
+    "sign_entity_card",
     "build_endpoints",
-    "load_agent_card",
+    "load_entity_card",
     "resolve_keypair",
     "build_runtime_card",
     "compute_card_hash",

@@ -25,7 +25,7 @@ _test_kp = generate_keypair()
 
 FAKE_CONFIG = {
     "schema_version": "2.0",
-    "agent_id": _test_kp.agent_id,
+    "entity_id": _test_kp.entity_id,
     "public_key": _test_kp.public_key_string,
     "private_key": _test_kp.private_key_b64,
     "name": "Test Agent",

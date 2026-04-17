@@ -34,7 +34,7 @@ _user_agent: "UserAgent" = None
 
 
 @tool
-def search_agents(query: str) -> str:
+def search_entities(query: str) -> str:
     """Search the Zynd agent network for specialist agents matching a query.
     Use this when the user needs a specialist (e.g., stock analysis, weather, etc.).
     Returns a list of available agents with their names and descriptions."""
@@ -62,7 +62,7 @@ def connect_and_ask(agent_number: int, question: str) -> str:
     agent_number is the 1-based index from search results.
     Handles payment (x402) automatically if required."""
     if not _user_agent or not _user_agent.last_search_results:
-        return "No search results. Use search_agents first."
+        return "No search results. Use search_entities first."
 
     idx = agent_number - 1
     results = _user_agent.last_search_results
@@ -72,7 +72,7 @@ def connect_and_ask(agent_number: int, question: str) -> str:
     agent = results[idx]
 
     # Connect
-    if not agent.get("agent_url") and not agent.get("httpWebhookUrl"):
+    if not agent.get("entity_url") and not agent.get("httpWebhookUrl"):
         return f"Agent {agent.get('name', '?')} has no URL."
     _zynd_agent.connect_agent(agent)
 
@@ -84,8 +84,8 @@ def connect_and_ask(agent_number: int, question: str) -> str:
     try:
         message = AgentMessage(
             content=question,
-            sender_id=_zynd_agent.agent_id,
-            receiver_id=agent.get("agent_id", agent.get("didIdentifier")),
+            sender_id=_zynd_agent.entity_id,
+            receiver_id=agent.get("entity_id", agent.get("didIdentifier")),
             message_type="query",
             sender_public_key=(
                 _zynd_agent.keypair.public_key_string
@@ -127,7 +127,7 @@ class UserAgent:
 
         # LLM with tools bound
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
-        tools = [search_agents, connect_and_ask]
+        tools = [search_entities, connect_and_ask]
         self.llm = llm.bind_tools(tools)
         self.tools_by_name = {t.name: t for t in tools}
 
@@ -141,7 +141,7 @@ class UserAgent:
                 "You are a helpful assistant connected to the Zynd agent network. "
                 "You can chat normally for general questions. "
                 "When the user needs a specialist (stock data, market analysis, weather, etc.), "
-                "use the search_agents tool to find one, then use connect_and_ask to delegate. "
+                "use the search_entities tool to find one, then use connect_and_ask to delegate. "
                 "Always pick the most relevant agent from results. "
                 "Be concise and helpful."
             )))

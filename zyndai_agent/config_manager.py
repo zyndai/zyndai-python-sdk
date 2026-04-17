@@ -83,34 +83,34 @@ class ConfigManager:
         kp = generate_keypair()
 
         # Derive new agent ID
-        agent_id = kp.agent_id
+        entity_id = kp.entity_id
 
         # Build agent URL from webhook config
-        agent_url = _build_agent_url(agent_config)
+        entity_url = _build_entity_url(agent_config)
 
         # Register on new registry
         try:
-            dns_registry.register_agent(
+            dns_registry.register_entity(
                 registry_url=agent_config.registry_url,
                 keypair=kp,
                 name=config.get("name", agent_config.name),
-                entity_url=agent_url,
+                entity_url=entity_url,
                 category=getattr(agent_config, "category", "general"),
                 tags=getattr(agent_config, "tags", None),
                 summary=getattr(agent_config, "summary", None),
             )
-            print(f"Registered migrated agent on agent-dns: {agent_id}")
+            print(f"Registered migrated agent on agent-dns: {entity_id}")
         except Exception as e:
             print(f"Warning: Could not register on agent-dns during migration: {e}")
 
         new_config = {
             "schema_version": "2.0",
-            "agent_id": agent_id,
+            "entity_id": entity_id,
             "public_key": kp.public_key_string,
             "private_key": kp.private_key_b64,
             "name": config.get("name", agent_config.name),
             "description": config.get("description", agent_config.description),
-            "agent_url": agent_url,
+            "entity_url": entity_url,
             "registry_url": agent_config.registry_url,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "legacy_seed": config.get("seed"),  # Preserve for x402 payment continuity
@@ -132,28 +132,28 @@ class ConfigManager:
         """
         # Generate or derive keypair
         dev_kp_path = getattr(agent_config, "developer_keypair_path", None)
-        agent_index = getattr(agent_config, "agent_index", None)
+        entity_index = getattr(agent_config, "entity_index", None)
 
-        if dev_kp_path and agent_index is not None:
+        if dev_kp_path and entity_index is not None:
             # HD derivation from developer key
             dev_kp = load_keypair(dev_kp_path)
-            kp = derive_agent_keypair(dev_kp.private_key, agent_index)
+            kp = derive_agent_keypair(dev_kp.private_key, entity_index)
         else:
             # Generate fresh keypair locally
             kp = generate_keypair()
 
-        agent_id = kp.agent_id
+        entity_id = kp.entity_id
 
         # Build agent URL
-        agent_url = _build_agent_url(agent_config)
+        entity_url = _build_entity_url(agent_config)
 
         # Register on agent-dns mesh
         try:
-            dns_registry.register_agent(
+            dns_registry.register_entity(
                 registry_url=agent_config.registry_url,
                 keypair=kp,
                 name=agent_config.name,
-                entity_url=agent_url,
+                entity_url=entity_url,
                 category=getattr(agent_config, "category", "general"),
                 tags=getattr(agent_config, "tags", None),
                 summary=getattr(agent_config, "summary", None),
@@ -164,12 +164,12 @@ class ConfigManager:
 
         config = {
             "schema_version": "2.0",
-            "agent_id": agent_id,
+            "entity_id": entity_id,
             "public_key": kp.public_key_string,
             "private_key": kp.private_key_b64,
             "name": agent_config.name,
             "description": agent_config.description,
-            "agent_url": agent_url,
+            "entity_url": entity_url,
             "registry_url": agent_config.registry_url,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
@@ -191,7 +191,7 @@ class ConfigManager:
             agent_config: AgentConfig instance
 
         Returns:
-            dict with keys: agent_id, public_key, private_key, name, description, etc.
+            dict with keys: entity_id, public_key, private_key, name, description, etc.
         """
         config_dir = getattr(agent_config, "config_dir", None)
         config = ConfigManager.load_config(config_dir)
@@ -218,7 +218,7 @@ class ConfigManager:
         )
 
 
-def _build_agent_url(agent_config) -> str:
+def _build_entity_url(agent_config) -> str:
     """Build the agent URL from webhook config."""
     if getattr(agent_config, "webhook_url", None):
         url = agent_config.webhook_url

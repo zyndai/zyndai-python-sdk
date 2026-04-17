@@ -2,7 +2,7 @@
 import logging
 import requests
 
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import List, Optional, TypedDict
 
 from zyndai_agent import dns_registry
 
@@ -16,13 +16,13 @@ logger = logging.getLogger("SearchAndDiscovery")
 
 class AgentSearchResponse(TypedDict):
     """Search result from agent-dns registry."""
-    agent_id: str
+    entity_id: str
     name: str
     summary: str
     category: str
     tags: list
     capability_summary: Optional[dict]
-    agent_url: str
+    entity_url: str
     home_registry: str
     score: float
     score_breakdown: Optional[dict]
@@ -42,7 +42,7 @@ class SearchAndDiscoveryManager:
         self.agents = []
         self.registry_url = registry_url
 
-    def search_agents(
+    def search_entities(
         self,
         keyword: Optional[str] = None,
         category: Optional[str] = None,
@@ -55,7 +55,6 @@ class SearchAndDiscoveryManager:
         limit: int = 10,
         federated: bool = False,
         enrich: bool = False,
-        entity_type: Optional[str] = None,
     ) -> List[AgentSearchResponse]:
         """
         Search for agents using the agent-dns POST /v1/search endpoint.
@@ -78,7 +77,7 @@ class SearchAndDiscoveryManager:
         """
         logger.info(f"Searching agents with query='{keyword}', skills={skills}")
 
-        result = dns_registry.search_agents(
+        result = dns_registry.search_entities(
             registry_url=self.registry_url,
             query=keyword,
             category=category,
@@ -91,7 +90,6 @@ class SearchAndDiscoveryManager:
             max_results=limit,
             federated=federated,
             enrich=enrich,
-            entity_type=entity_type,
         )
 
         agents = result.get("results", [])
@@ -121,7 +119,7 @@ class SearchAndDiscoveryManager:
         keyword = " ".join(capabilities) if capabilities else None
         limit = top_k if top_k is not None else 10
 
-        return self.search_agents(
+        return self.search_entities(
             keyword=keyword,
             skills=capabilities if capabilities else None,
             limit=limit,
@@ -142,114 +140,28 @@ class SearchAndDiscoveryManager:
         Returns:
             List of matching agents
         """
-        return self.search_agents(keyword=keyword, limit=limit)
+        return self.search_entities(keyword=keyword, limit=limit)
 
-    def get_agent_by_id(self, agent_id: str) -> Optional[AgentSearchResponse]:
+    def get_agent_by_id(self, entity_id: str) -> Optional[AgentSearchResponse]:
         """
         Get a specific agent by its ID.
 
         Args:
-            agent_id: The agent ID (agdns:... format)
+            entity_id: The agent ID (agdns:... format)
 
         Returns:
             Agent details or None if not found
         """
-        return dns_registry.get_agent(self.registry_url, agent_id)
+        return dns_registry.get_entity(self.registry_url, entity_id)
 
-    def search_services(
-        self,
-        keyword: Optional[str] = None,
-        category: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-        skills: Optional[List[str]] = None,
-        limit: int = 10,
-    ) -> List[AgentSearchResponse]:
-        """Search for services (not agents). Sets entity_type='service' automatically."""
-        return self.search_agents(
-            keyword=keyword, category=category, tags=tags,
-            skills=skills, limit=limit, entity_type="service",
-        )
-
-    def call_service(
-        self,
-        service_id: str,
-        method: str = "GET",
-        path: str = "",
-        params: Optional[Dict[str, Any]] = None,
-        body: Optional[Dict[str, Any]] = None,
-        timeout: int = 30,
-    ) -> Dict[str, Any]:
-        """Call a registered service by its ID. Auto-uses x402 for paid services."""
-        service = dns_registry.get_agent(self.registry_url, service_id)
-        if not service:
-            raise ValueError(f"Service not found: {service_id}")
-
-        endpoint = service.get("service_endpoint") or service.get("entity_url") or service.get("agent_url")
-        if not endpoint:
-            raise ValueError(f"Service '{service.get('name')}' has no endpoint URL")
-
-        url = endpoint.rstrip("/") + path
-        session = getattr(self, "x402_processor", None)
-        http = session.session if session and hasattr(session, "session") else requests
-
-        resp = http.request(
-            method=method.upper(), url=url, params=params,
-            json=body if method.upper() in ("POST", "PUT", "PATCH") else None,
-            timeout=timeout,
-        )
-        if resp.status_code >= 400:
-            raise RuntimeError(f"Service '{service.get('name')}' returned {resp.status_code}: {resp.text[:200]}")
-        try:
-            return resp.json()
-        except Exception:
-            return {"raw": resp.text}
-
-    def use_service(
-        self,
-        keyword: str,
-        method: str = "GET",
-        path: str = "",
-        params: Optional[Dict[str, Any]] = None,
-        body: Optional[Dict[str, Any]] = None,
-        category: Optional[str] = None,
-        timeout: int = 30,
-    ) -> Dict[str, Any]:
-        """Discover a service by keyword and call it in one step."""
-        services = self.search_services(keyword=keyword, category=category, limit=1)
-        if not services:
-            raise ValueError(f"No service found matching '{keyword}'")
-        service = services[0]
-        logger.info(f"Using service: {service.get('name')} ({service.get('agent_id')})")
-
-        # Use endpoint directly from search result (avoids extra lookup)
-        endpoint = service.get("service_endpoint") or service.get("entity_url") or service.get("agent_url")
-        if not endpoint:
-            raise ValueError(f"Service '{service.get('name')}' has no endpoint URL")
-
-        url = endpoint.rstrip("/") + path
-        session = getattr(self, "x402_processor", None)
-        http = session.session if session and hasattr(session, "session") else requests
-
-        resp = http.request(
-            method=method.upper(), url=url, params=params,
-            json=body if method.upper() in ("POST", "PUT", "PATCH") else None,
-            timeout=timeout,
-        )
-        if resp.status_code >= 400:
-            raise RuntimeError(f"Service '{service.get('name')}' returned {resp.status_code}: {resp.text[:200]}")
-        try:
-            return resp.json()
-        except Exception:
-            return {"raw": resp.text}
-
-    def get_agent_card(self, agent_id: str) -> Optional[dict]:
+    def get_entity_card(self, entity_id: str) -> Optional[dict]:
         """
         Fetch an agent's Agent Card.
 
         Args:
-            agent_id: The agent ID
+            entity_id: The agent ID
 
         Returns:
             Agent Card dict or None
         """
-        return dns_registry.get_agent_card(self.registry_url, agent_id)
+        return dns_registry.get_entity_card(self.registry_url, entity_id)

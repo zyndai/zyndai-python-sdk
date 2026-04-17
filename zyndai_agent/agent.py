@@ -17,9 +17,9 @@ from zyndai_agent.ed25519_identity import (
     Ed25519Keypair,
     keypair_from_private_bytes,
 )
-from zyndai_agent.agent_card import build_agent_card, sign_agent_card
-from zyndai_agent.agent_card_loader import (
-    load_agent_card,
+from zyndai_agent.entity_card import build_entity_card, sign_entity_card
+from zyndai_agent.entity_card_loader import (
+    load_entity_card,
     resolve_keypair,
     build_runtime_card,
     compute_card_hash,
@@ -50,7 +50,7 @@ class AgentConfig(ZyndBaseConfig):
 
     # Agent-specific fields
     developer_keypair_path: Optional[str] = None
-    agent_index: Optional[int] = None
+    entity_index: Optional[int] = None
 
     # MQTT (legacy, kept for backward compatibility)
     mqtt_broker_url: Optional[str] = None
@@ -94,7 +94,7 @@ class ZyndAIAgent(ZyndBase):
         env_keypair = self._try_resolve_keypair_legacy(agent_config)
         if env_keypair:
             self.keypair = env_keypair
-            self.agent_id = self.keypair.agent_id
+            self.entity_id = self.keypair.entity_id
             self.x402_processor = X402PaymentProcessor(
                 ed25519_private_key_bytes=self.keypair.private_key_bytes
             )
@@ -104,7 +104,7 @@ class ZyndAIAgent(ZyndBase):
             config = {}
         else:
             config = ConfigManager.load_or_create(agent_config)
-            self.agent_id = config.get("agent_id", config.get("id"))
+            self.entity_id = config.get("entity_id", config.get("id"))
             private_key_b64 = config.get("private_key")
             if private_key_b64:
                 private_bytes = base64.b64decode(private_key_b64)
@@ -133,8 +133,8 @@ class ZyndAIAgent(ZyndBase):
         identity_credential = config.get("did", {}) if config else {}
         AgentCommunicationManager.__init__(
             self,
-            self.agent_id,
-            default_inbox_topic=f"{self.agent_id}/inbox",
+            self.entity_id,
+            default_inbox_topic=f"{self.entity_id}/inbox",
             default_outbox_topic=agent_config.default_outbox_topic,
             auto_reconnect=True,
             message_history_limit=agent_config.message_history_limit,

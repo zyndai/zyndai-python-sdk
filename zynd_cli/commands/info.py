@@ -60,7 +60,7 @@ def run(args: argparse.Namespace):
                 derived = meta.get("derived_from", {})
                 agent_infos.append({
                     "name": agent_folder.name,
-                    "agent_id": kp.agent_id,
+                    "entity_id": kp.entity_id,
                     "public_key": kp.public_key_string,
                     "keypair_path": str(kp_file),
                     "derivation_index": derived.get("index"),
@@ -72,7 +72,7 @@ def run(args: argparse.Namespace):
     # Fetch FQANs for agents from registry
     for a_info in agent_infos:
         try:
-            resp = _req.get(f"{registry_url}/v1/entities/{a_info['agent_id']}", timeout=5)
+            resp = _req.get(f"{registry_url}/v1/entities/{a_info['entity_id']}", timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
                 a_info["fqan"] = data.get("fqan", "")
@@ -111,7 +111,7 @@ def run(args: argparse.Namespace):
                 idx = a.get("derivation_index")
                 idx_label = f" [dim](index {idx})[/dim]" if idx is not None else ""
                 console.print(f"    [bold #06B6D4]{a['name']}[/bold #06B6D4]{idx_label}")
-                console.print(f"      [dim]ID:[/dim]   {a['agent_id']}")
+                console.print(f"      [dim]ID:[/dim]   {a['entity_id']}")
                 if a.get("fqan"):
                     console.print(f"      [dim]FQAN:[/dim] [bold #8B5CF6]{a['fqan']}[/bold #8B5CF6]")
                 console.print(f"      [dim]Key:[/dim]  {a['public_key']}")
@@ -139,7 +139,7 @@ def run(args: argparse.Namespace):
                 idx = a.get("derivation_index")
                 idx_label = f" (index {idx})" if idx is not None else ""
                 print(f"    {a['name']}{idx_label}")
-                print(f"      ID:   {a['agent_id']}")
+                print(f"      ID:   {a['entity_id']}")
                 if a.get("fqan"):
                     print(f"      FQAN: {a['fqan']}")
                 print(f"      Key:  {a['public_key']}")

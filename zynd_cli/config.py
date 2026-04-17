@@ -48,15 +48,15 @@ def agents_dir() -> Path:
     return zynd_dir() / AGENTS_DIR_NAME
 
 
-def agent_dir(agent_name: str) -> Path:
-    """Return ~/.zynd/agents/<agent_name>/."""
-    safe_name = agent_name.lower().replace(" ", "-")
+def agent_dir(entity_name: str) -> Path:
+    """Return ~/.zynd/agents/<entity_name>/."""
+    safe_name = entity_name.lower().replace(" ", "-")
     return agents_dir() / safe_name
 
 
-def agent_keypair_path(agent_name: str) -> Path:
-    """Return ~/.zynd/agents/<agent_name>/keypair.json."""
-    return agent_dir(agent_name) / "keypair.json"
+def agent_keypair_path(entity_name: str) -> Path:
+    """Return ~/.zynd/agents/<entity_name>/keypair.json."""
+    return agent_dir(entity_name) / "keypair.json"
 
 
 def services_dir() -> Path:

@@ -1,5 +1,4 @@
 import time
-import inspect
 import logging
 import threading
 import requests
@@ -32,7 +31,7 @@ class WebhookCommunicationManager:
 
     def __init__(
         self,
-        agent_id: str,
+        entity_id: str,
         webhook_host: str = "0.0.0.0",
         webhook_port: int = 5000,
         webhook_url: Optional[str] = None,
@@ -50,7 +49,7 @@ class WebhookCommunicationManager:
         Initialize the webhook agent communication manager.
 
         Args:
-            agent_id: Unique identifier for this agent
+            entity_id: Unique identifier for this agent
             webhook_host: Host address to bind the webhook server (default: 0.0.0.0)
             webhook_port: Port number for the webhook server (default: 5000)
             webhook_url: Public webhook URL (auto-generated if None)
@@ -61,7 +60,7 @@ class WebhookCommunicationManager:
             agent_card_builder: Callable that returns a signed Agent Card dict
         """
 
-        self.agent_id = agent_id
+        self.entity_id = entity_id
         self.webhook_host = webhook_host
         self.webhook_port = webhook_port
         self.webhook_url = webhook_url
@@ -82,17 +81,12 @@ class WebhookCommunicationManager:
         self.message_handlers = []
         self.target_webhook_url = None
         self.pending_responses = {}  # Store responses by message_id
-        self._pending_events: Dict[str, threading.Event] = {}
 
         # Thread safety
         self._lock = threading.Lock()
 
-        # Optional features wired by ZyndAIAgent
-        self._verify_signatures: bool = False
-        self._session_manager = None
-
         # Create Flask app
-        self.flask_app = Flask(f"agent_{agent_id}")
+        self.flask_app = Flask(f"entity_{entity_id}")
         self.flask_app.logger.setLevel(logging.ERROR)  # Suppress Flask logging
 
         if price is not None and pay_to_address is not None:
@@ -140,7 +134,7 @@ class WebhookCommunicationManager:
         if self.use_ngrok:
             self._start_ngrok_tunnel()
 
-        print("Agent webhook server started")
+        print("Webhook server started")
         print(f"Listening on {self.webhook_url}")
 
     def _setup_routes(self):
@@ -157,7 +151,7 @@ class WebhookCommunicationManager:
         @self.flask_app.route("/health", methods=["GET"])
         def health_check():
             return jsonify(
-                {"status": "ok", "agent_id": self.agent_id, "timestamp": time.time()}
+                {"status": "ok", "entity_id": self.entity_id, "timestamp": time.time()}
             ), 200
 
         # Agent Card route for agent-dns
@@ -166,41 +160,28 @@ class WebhookCommunicationManager:
             if self.agent_card_builder:
                 card = self.agent_card_builder()
                 return jsonify(card), 200
-            return jsonify({"error": "Agent Card not configured"}), 404
+            return jsonify({"error": "Entity Card not configured"}), 404
 
     def _handle_webhook_request(self, sync=False):
         """Handle incoming webhook POST requests."""
         try:
+            # Verify request is JSON
             if not request.is_json:
                 logger.error("Received non-JSON request")
                 return jsonify({"error": "Content-Type must be application/json"}), 400
 
             payload = request.get_json()
 
-            if self._verify_signatures:
-                sig_error = self._verify_incoming_signature(payload)
-                if sig_error:
-                    return sig_error
+            # Parse message from dict (request.get_json() returns a dict, not a string)
+            message = AgentMessage.from_dict(payload)
 
-            # Typed messages (InvokeMessage etc.) store content inside payload,
-            # not at the top level — AgentMessage.from_dict would lose it.
-            if "type" in payload:
-                from zyndai_agent.typed_messages import parse_message, typed_to_legacy
-                try:
-                    typed_msg = parse_message(payload)
-                    message = typed_to_legacy(typed_msg)
-                    message._typed = typed_msg
-                except Exception as e:
-                    logger.warning(f"[{self.agent_id}] Typed message parse failed, falling back to legacy: {e}")
-                    message = AgentMessage.from_dict(payload)
-            else:
-                message = AgentMessage.from_dict(payload)
+            logger.info(f"[{self.entity_id}] Received message from {message.sender_id}")
 
-            logger.info(f"[{self.agent_id}] Received message from {message.sender_id}")
-
+            # Auto-connect to sender if not connected
             if not self.is_agent_connected:
                 self.is_agent_connected = True
 
+            # Store in history
             message_with_metadata = {
                 "message": message,
                 "received_at": time.time(),
@@ -214,51 +195,57 @@ class WebhookCommunicationManager:
                 self.received_messages.append(message_with_metadata)
                 self.message_history.append(message_with_metadata)
 
+                # Maintain history limit
                 if len(self.message_history) > self.message_history_limit:
                     self.message_history = self.message_history[
                         -self.message_history_limit :
                     ]
 
-            session = None
-            if self._session_manager is not None:
-                session = self._session_manager.get_or_create(
-                    message.conversation_id, message.sender_id
-                )
-                session.add_message(message)
-
+            # Check if synchronous response is requested
             if sync:
-                event = threading.Event()
-                with self._lock:
-                    self._pending_events[message.message_id] = event
+                # Wait for handler to process and store response
+                # Invoke message handlers synchronously
+                for handler in self.message_handlers:
+                    try:
+                        handler(message, None)  # No topic in webhook context
+                    except Exception as e:
+                        logger.error(f"Error in message handler: {e}")
 
-                self._dispatch_to_handlers(message, session)
+                # Wait for response (with timeout)
+                timeout = 30  # 30 seconds
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    with self._lock:
+                        if message.message_id in self.pending_responses:
+                            response = self.pending_responses.pop(message.message_id)
+                            return jsonify(
+                                {
+                                    "status": "success",
+                                    "message_id": message.message_id,
+                                    "response": response,
+                                    "timestamp": time.time(),
+                                }
+                            ), 200
+                    time.sleep(0.1)  # Small delay to avoid busy waiting
 
-                event.wait(timeout=30)
-
-                with self._lock:
-                    self._pending_events.pop(message.message_id, None)
-                    if message.message_id in self.pending_responses:
-                        response = self.pending_responses.pop(message.message_id)
-                        return jsonify(
-                            {
-                                "status": "success",
-                                "message_id": message.message_id,
-                                "response": response,
-                                "timestamp": time.time(),
-                            }
-                        ), 200
-
+                # Timeout - no response received
                 return jsonify(
                     {
                         "status": "timeout",
                         "message_id": message.message_id,
-                        "error": "Agent did not respond within timeout period",
+                        "error": "Entity did not respond within timeout period",
                         "timestamp": time.time(),
                     }
                 ), 408
             else:
-                self._dispatch_to_handlers(message, session)
+                # Async mode - invoke handlers and return immediately
+                for handler in self.message_handlers:
+                    try:
+                        handler(message, None)  # No topic in webhook context
+                    except Exception as e:
+                        logger.error(f"Error in message handler: {e}")
 
+                # Return success
                 return jsonify(
                     {
                         "status": "received",
@@ -270,47 +257,6 @@ class WebhookCommunicationManager:
         except Exception as e:
             logger.error(f"Error handling webhook request: {e}")
             return jsonify({"error": str(e)}), 500
-
-    def _verify_incoming_signature(self, payload: dict):
-        """Verify Ed25519 signature on incoming typed message. Returns Flask error response or None."""
-        if "type" not in payload:
-            return None
-
-        from zyndai_agent.typed_messages import parse_message
-        from zyndai_agent.signatures import verify_message
-
-        try:
-            typed_msg = parse_message(payload)
-        except Exception as e:
-            logger.warning(f"[{self.agent_id}] Failed to parse typed message for signature verification: {e}")
-            return jsonify({"error": "Malformed typed message"}), 400
-
-        if not typed_msg.signature or not typed_msg.sender_public_key:
-            return None
-
-        pub_b64 = typed_msg.sender_public_key
-        if pub_b64.startswith("ed25519:"):
-            pub_b64 = pub_b64[len("ed25519:"):]
-        if not verify_message(typed_msg, pub_b64):
-            return jsonify({"error": "Invalid signature"}), 401
-
-        return None
-
-    def _dispatch_to_handlers(self, message: AgentMessage, session=None):
-        """Invoke registered handlers, passing session to 3-arg handlers."""
-        for handler in self.message_handlers:
-            try:
-                param_count = len(inspect.signature(handler).parameters)
-            except (ValueError, TypeError):
-                param_count = 2
-
-            try:
-                if param_count >= 3 and session is not None:
-                    handler(message, None, session)
-                else:
-                    handler(message, None)
-            except Exception as e:
-                logger.error(f"[{self.agent_id}] Handler {handler!r} raised: {e}")
 
     def start_webhook_server(self):
         """Start Flask webhook server in background thread."""
@@ -336,7 +282,7 @@ class WebhookCommunicationManager:
                     )
 
                 self.flask_thread = threading.Thread(
-                    target=run_flask, daemon=True, name=f"WebhookServer-{self.agent_id}"
+                    target=run_flask, daemon=True, name=f"WebhookServer-{self.entity_id}"
                 )
                 self.flask_thread.start()
 
@@ -385,12 +331,12 @@ class WebhookCommunicationManager:
                 from pyngrok import ngrok
 
                 ngrok.disconnect(self.ngrok_tunnel.public_url)
-                logger.info(f"[{self.agent_id}] Ngrok tunnel closed")
+                logger.info(f"[{self.entity_id}] Ngrok tunnel closed")
             except Exception as e:
                 logger.warning(f"Failed to close ngrok tunnel: {e}")
 
         self.is_running = False
-        logger.info(f"[{self.agent_id}] Webhook server stopped")
+        logger.info(f"[{self.entity_id}] Webhook server stopped")
 
     def _start_ngrok_tunnel(self):
         """Create an ngrok tunnel to expose the local webhook server publicly."""
@@ -415,7 +361,7 @@ class WebhookCommunicationManager:
             self.webhook_url = f"{public_url}/webhook"
 
             logger.info(
-                f"[{self.agent_id}] Ngrok tunnel created: {public_url} -> localhost:{self.webhook_port}"
+                f"[{self.entity_id}] Ngrok tunnel created: {public_url} -> localhost:{self.webhook_port}"
             )
             print(f"Ngrok tunnel active: {public_url} -> localhost:{self.webhook_port}")
 
@@ -448,17 +394,19 @@ class WebhookCommunicationManager:
             return "Webhook server not running. Cannot send messages."
 
         if not self.target_webhook_url:
-            return "No target agent connected. Use connect_agent() first."
+            return "No target entity connected. Use connect_agent() first."
 
         try:
             # Create structured message
             message = AgentMessage(
                 content=message_content,
-                sender_id=self.agent_id,
+                sender_id=self.entity_id,
                 receiver_id=receiver_id,
                 message_type=message_type,
                 sender_did=self.identity_credential,
-                sender_public_key=self.keypair.public_key_string if self.keypair else None,
+                sender_public_key=self.keypair.public_key_string
+                if self.keypair
+                else None,
             )
 
             # Convert to dict for JSON serialization
@@ -499,18 +447,18 @@ class WebhookCommunicationManager:
                 return error_msg
 
         except requests.exceptions.Timeout:
-            error_msg = "Error: Request timed out. Target agent may be offline."
+            error_msg = "Error: Request timed out. Target entity may be offline."
             logger.error(error_msg)
             return error_msg
         except requests.exceptions.ConnectionError:
             error_msg = (
-                "Error: Could not connect to target agent. Agent may be offline."
+                "Error: Could not connect to target entity. Entity may be offline."
             )
             logger.error(error_msg)
             return error_msg
         except Exception as e:
             error_msg = f"Error sending message: {str(e)}"
-            logger.error(f"[{self.agent_id}] {error_msg}")
+            logger.error(f"[{self.entity_id}] {error_msg}")
             return error_msg
 
     def read_messages(self) -> str:
@@ -557,7 +505,7 @@ class WebhookCommunicationManager:
         """
         with self._lock:
             self.message_handlers.append(handler_function)
-        logger.info(f"[{self.agent_id}] Added custom message handler")
+        logger.info(f"[{self.entity_id}] Added custom message handler")
 
     def register_handler(self, handler_fn: Callable[[AgentMessage, str], None]):
         """Alias for add_message_handler for backward compatibility."""
@@ -573,15 +521,12 @@ class WebhookCommunicationManager:
         """
         with self._lock:
             self.pending_responses[message_id] = response
-            event = self._pending_events.get(message_id)
-            if event:
-                event.set()
-        logger.info(f"[{self.agent_id}] Set response for message {message_id}")
+        logger.info(f"[{self.entity_id}] Set response for message {message_id}")
 
     def get_connection_status(self) -> Dict[str, Any]:
         """Get the current webhook server status and statistics."""
         return {
-            "agent_id": self.agent_id,
+            "entity_id": self.entity_id,
             "is_running": self.is_running,
             "webhook_url": self.webhook_url,
             "webhook_port": self.webhook_port,
@@ -607,18 +552,18 @@ class WebhookCommunicationManager:
         """
         Connect to another agent.
 
-        Supports both new agent-dns format (agent_url + Agent Card) and
+        Supports both new agent-dns format (entity_url + Agent Card) and
         legacy format (httpWebhookUrl).
 
         Args:
             agent: Agent search response dict
         """
-        # New agent-dns format: use agent_url to fetch Agent Card
-        agent_url = agent.get("agent_url")
-        if agent_url:
+        # New agent-dns format: use entity_url to fetch Agent Card
+        entity_url = agent.get("entity_url")
+        if entity_url:
             # Try to fetch Agent Card to get invoke endpoint
             try:
-                card_url = f"{agent_url.rstrip('/')}/.well-known/agent.json"
+                card_url = f"{entity_url.rstrip('/')}/.well-known/agent.json"
                 resp = requests.get(card_url, timeout=10)
                 if resp.status_code == 200:
                     card = resp.json()
@@ -628,18 +573,18 @@ class WebhookCommunicationManager:
                         self.target_webhook_url = invoke_url
                         self.is_agent_connected = True
                         logger.info(
-                            f"Connected to agent {agent.get('agent_id', agent.get('name', 'unknown'))} "
-                            f"via Agent Card at {self.target_webhook_url}"
+                            f"Connected to entity {agent.get('entity_id', agent.get('name', 'unknown'))} "
+                            f"via Card at {self.target_webhook_url}"
                         )
                         return
             except Exception as e:
-                logger.warning(f"Could not fetch Agent Card from {agent_url}: {e}")
+                logger.warning(f"Could not fetch Agent Card from {entity_url}: {e}")
 
-            # Fallback: use agent_url/webhook/sync directly
-            self.target_webhook_url = f"{agent_url.rstrip('/')}/webhook/sync"
+            # Fallback: use entity_url/webhook/sync directly
+            self.target_webhook_url = f"{entity_url.rstrip('/')}/webhook/sync"
             self.is_agent_connected = True
             logger.info(
-                f"Connected to agent at {self.target_webhook_url} (direct, no card)"
+                f"Connected to entity at {self.target_webhook_url} (direct, no card)"
             )
             return
 
@@ -649,10 +594,10 @@ class WebhookCommunicationManager:
             self.target_webhook_url = webhook_url
             self.is_agent_connected = True
             logger.info(
-                f"Connected to agent {agent.get('didIdentifier', agent.get('agent_id', 'unknown'))} at {self.target_webhook_url}"
+                f"Connected to agent {agent.get('didIdentifier', agent.get('entity_id', 'unknown'))} at {self.target_webhook_url}"
             )
             return
 
         raise ValueError(
-            "Agent does not have agent_url or httpWebhookUrl. Cannot connect via webhook."
+            "Agent does not have entity_url or httpWebhookUrl. Cannot connect via webhook."
         )

@@ -30,6 +30,6 @@ def run(args: argparse.Namespace):
 
     print(f"Developer keypair created: {key_path}")
     print(f"  Public key: {kp.public_key_string}")
-    print(f"  Agent ID:   {kp.agent_id}")
+    print(f"  Agent ID:   {kp.entity_id}")
     print()
     print("You can now register agents with: zynd register")

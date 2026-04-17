@@ -139,7 +139,7 @@ class TestKeysCommand:
         keys_run(argparse.Namespace(keys_action="list"))
         out = capsys.readouterr().out
         assert "developer" in out
-        assert "agdns:" in out
+        assert "zns:" in out
 
     def test_keys_create(self, tmp_zynd_home, capsys):
         from zynd_cli.commands.keys import run
@@ -200,10 +200,10 @@ class TestKeysCommand:
 
 
 class TestSearchCommand:
-    @mock.patch("zyndai_agent.dns_registry.search_agents")
+    @mock.patch("zyndai_agent.dns_registry.search_entities")
     def test_search_json(self, mock_search, tmp_zynd_home, capsys):
         mock_search.return_value = {
-            "results": [{"agent_id": "agdns:abc123", "name": "TestBot", "category": "test"}],
+            "results": [{"entity_id": "agdns:abc123", "name": "TestBot", "category": "test"}],
             "total_found": 1,
             "has_more": False,
         }
@@ -225,11 +225,11 @@ class TestSearchCommand:
         assert data["total_found"] == 1
         assert data["results"][0]["name"] == "TestBot"
 
-    @mock.patch("zyndai_agent.dns_registry.search_agents")
+    @mock.patch("zyndai_agent.dns_registry.search_entities")
     def test_search_pretty(self, mock_search, tmp_zynd_home, capsys):
         mock_search.return_value = {
             "results": [
-                {"agent_id": "agdns:abc123", "name": "TestBot", "category": "test", "agent_url": "http://localhost:5000"}
+                {"entity_id": "agdns:abc123", "name": "TestBot", "category": "test", "entity_url": "http://localhost:5000"}
             ],
             "total_found": 1,
             "has_more": False,
@@ -253,30 +253,30 @@ class TestSearchCommand:
 
 
 class TestResolveCommand:
-    @mock.patch("zynd_cli.commands.resolve.get_agent")
+    @mock.patch("zynd_cli.commands.resolve.get_entity")
     def test_resolve_found(self, mock_get, tmp_zynd_home, capsys):
         mock_get.return_value = {
-            "agent_id": "agdns:abc123",
+            "entity_id": "agdns:abc123",
             "name": "TestBot",
-            "agent_url": "http://localhost:5000",
+            "entity_url": "http://localhost:5000",
             "category": "test",
             "public_key": "ed25519:AAAA",
         }
         from zynd_cli.commands.resolve import run
         import argparse
 
-        args = argparse.Namespace(agent_id="agdns:abc123", output_json=False, registry=None)
+        args = argparse.Namespace(entity_id="agdns:abc123", output_json=False, registry=None)
         run(args)
         out = capsys.readouterr().out
         assert "TestBot" in out
 
-    @mock.patch("zynd_cli.commands.resolve.get_agent")
+    @mock.patch("zynd_cli.commands.resolve.get_entity")
     def test_resolve_not_found(self, mock_get, tmp_zynd_home):
         mock_get.return_value = None
         from zynd_cli.commands.resolve import run
         import argparse
 
-        args = argparse.Namespace(agent_id="agdns:missing", output_json=False, registry=None)
+        args = argparse.Namespace(entity_id="agdns:missing", output_json=False, registry=None)
         with pytest.raises(SystemExit):
             run(args)
 
@@ -373,7 +373,7 @@ class TestCardCommand:
 
         args = argparse.Namespace(
             card_action="show",
-            agent_id=None,
+            entity_id=None,
             file=card_path,
             output_json=True,
             registry=None,

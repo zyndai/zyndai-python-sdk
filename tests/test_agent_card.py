@@ -5,20 +5,20 @@ Tests for Agent Card building, signing, and serving.
 import json
 import pytest
 from zyndai_agent.ed25519_identity import generate_keypair, verify
-from zyndai_agent.agent_card import build_agent_card, sign_agent_card
+from zyndai_agent.entity_card import build_entity_card, sign_entity_card
 
 
 class TestBuildAgentCard:
     def test_basic_card(self):
         kp = generate_keypair()
-        card = build_agent_card(
-            agent_id=kp.agent_id,
+        card = build_entity_card(
+            entity_id=kp.entity_id,
             name="Test Agent",
             description="A test agent",
-            agent_url="http://localhost:5000",
+            entity_url="http://localhost:5000",
             keypair=kp,
         )
-        assert card["agent_id"] == kp.agent_id
+        assert card["entity_id"] == kp.entity_id
         assert card["name"] == "Test Agent"
         assert card["description"] == "A test agent"
         assert card["status"] == "online"
@@ -27,11 +27,11 @@ class TestBuildAgentCard:
 
     def test_endpoints(self):
         kp = generate_keypair()
-        card = build_agent_card(
-            agent_id=kp.agent_id,
+        card = build_entity_card(
+            entity_id=kp.entity_id,
             name="Test",
             description="Test",
-            agent_url="http://localhost:5000",
+            entity_url="http://localhost:5000",
             keypair=kp,
         )
         endpoints = card["endpoints"]
@@ -42,22 +42,22 @@ class TestBuildAgentCard:
 
     def test_endpoints_strips_webhook_suffix(self):
         kp = generate_keypair()
-        card = build_agent_card(
-            agent_id=kp.agent_id,
+        card = build_entity_card(
+            entity_id=kp.entity_id,
             name="Test",
             description="Test",
-            agent_url="http://localhost:5000/webhook",
+            entity_url="http://localhost:5000/webhook",
             keypair=kp,
         )
         assert card["endpoints"]["invoke"] == "http://localhost:5000/webhook/sync"
 
     def test_capabilities_conversion(self):
         kp = generate_keypair()
-        card = build_agent_card(
-            agent_id=kp.agent_id,
+        card = build_entity_card(
+            entity_id=kp.entity_id,
             name="Test",
             description="Test",
-            agent_url="http://localhost:5000",
+            entity_url="http://localhost:5000",
             keypair=kp,
             capabilities={"ai": ["nlp", "vision"], "protocols": ["http"]},
         )
@@ -69,11 +69,11 @@ class TestBuildAgentCard:
 
     def test_pricing(self):
         kp = generate_keypair()
-        card = build_agent_card(
-            agent_id=kp.agent_id,
+        card = build_entity_card(
+            entity_id=kp.entity_id,
             name="Test",
             description="Test",
-            agent_url="http://localhost:5000",
+            entity_url="http://localhost:5000",
             keypair=kp,
             price="$0.01",
         )
@@ -85,11 +85,11 @@ class TestBuildAgentCard:
 
     def test_no_pricing_when_none(self):
         kp = generate_keypair()
-        card = build_agent_card(
-            agent_id=kp.agent_id,
+        card = build_entity_card(
+            entity_id=kp.entity_id,
             name="Test",
             description="Test",
-            agent_url="http://localhost:5000",
+            entity_url="http://localhost:5000",
             keypair=kp,
         )
         assert "pricing" not in card
@@ -98,27 +98,27 @@ class TestBuildAgentCard:
 class TestSignAgentCard:
     def test_sign_adds_signature(self):
         kp = generate_keypair()
-        card = build_agent_card(
-            agent_id=kp.agent_id,
+        card = build_entity_card(
+            entity_id=kp.entity_id,
             name="Test",
             description="Test",
-            agent_url="http://localhost:5000",
+            entity_url="http://localhost:5000",
             keypair=kp,
         )
-        signed = sign_agent_card(card, kp)
+        signed = sign_entity_card(card, kp)
         assert "signature" in signed
         assert signed["signature"].startswith("ed25519:")
 
     def test_signature_verifies(self):
         kp = generate_keypair()
-        card = build_agent_card(
-            agent_id=kp.agent_id,
+        card = build_entity_card(
+            entity_id=kp.entity_id,
             name="Test",
             description="Test",
-            agent_url="http://localhost:5000",
+            entity_url="http://localhost:5000",
             keypair=kp,
         )
-        signed = sign_agent_card(card, kp)
+        signed = sign_entity_card(card, kp)
 
         # Verify: reconstruct canonical JSON without signature
         card_copy = {k: v for k, v in signed.items() if k != "signature"}
@@ -127,14 +127,14 @@ class TestSignAgentCard:
 
     def test_signature_fails_on_tamper(self):
         kp = generate_keypair()
-        card = build_agent_card(
-            agent_id=kp.agent_id,
+        card = build_entity_card(
+            entity_id=kp.entity_id,
             name="Test",
             description="Test",
-            agent_url="http://localhost:5000",
+            entity_url="http://localhost:5000",
             keypair=kp,
         )
-        signed = sign_agent_card(card, kp)
+        signed = sign_entity_card(card, kp)
 
         # Tamper with the card
         signed["name"] = "Tampered"
