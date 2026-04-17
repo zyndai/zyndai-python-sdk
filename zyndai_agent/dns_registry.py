@@ -466,7 +466,7 @@ def get_entity_fqan(registry_url: str, entity_id: str) -> Optional[str]:
             data = resp.json()
             results = data.get("results", [])
             for r in results:
-                if r.get("entity_id") == entity_id:
+                if r.get("agent_id") == entity_id:
                     fqan = r.get("fqan", "")
                     if fqan:
                         return fqan
