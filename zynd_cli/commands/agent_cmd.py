@@ -379,7 +379,7 @@ def _agent_register(args: argparse.Namespace):
                 registry_url=registry_url,
                 keypair=kp,
                 name=config["name"],
-                agent_url=agent_url,
+                entity_url=agent_url,
                 category=config.get("category", "general"),
                 tags=config.get("tags", []),
                 summary=config.get("summary", ""),

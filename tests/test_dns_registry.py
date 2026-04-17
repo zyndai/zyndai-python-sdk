@@ -15,14 +15,14 @@ class TestRegisterAgent:
         kp = generate_keypair()
         mock_response = MagicMock()
         mock_response.status_code = 201
-        mock_response.json.return_value = {"agent_id": kp.agent_id}
+        mock_response.json.return_value = {"entity_id": kp.agent_id}
         mock_post.return_value = mock_response
 
         agent_id = dns_registry.register_agent(
             registry_url="http://localhost:8080",
             keypair=kp,
             name="Test Agent",
-            agent_url="http://localhost:5000",
+            entity_url="http://localhost:5000",
             category="test",
             tags=["test"],
             summary="A test agent",
@@ -31,11 +31,10 @@ class TestRegisterAgent:
         assert agent_id == kp.agent_id
         mock_post.assert_called_once()
 
-        # Verify payload structure
         call_kwargs = mock_post.call_args
         body = call_kwargs[1]["json"]
         assert body["name"] == "Test Agent"
-        assert body["agent_url"] == "http://localhost:5000"
+        assert body["entity_url"] == "http://localhost:5000"
         assert body["public_key"] == kp.public_key_string
         assert body["signature"].startswith("ed25519:")
 
@@ -52,7 +51,7 @@ class TestRegisterAgent:
                 registry_url="http://localhost:8080",
                 keypair=kp,
                 name="Test",
-                agent_url="http://localhost:5000",
+                entity_url="http://localhost:5000",
             )
 
 
@@ -66,7 +65,7 @@ class TestGetAgent:
 
         result = dns_registry.get_agent("http://localhost:8080", "agdns:abc123")
         assert result["agent_id"] == "agdns:abc123"
-        mock_get.assert_called_once_with("http://localhost:8080/v1/agents/agdns:abc123")
+        mock_get.assert_called_once_with("http://localhost:8080/v1/entities/agdns:abc123")
 
     @patch("zyndai_agent.dns_registry.requests.get")
     def test_get_not_found(self, mock_get):
@@ -198,7 +197,7 @@ class TestGetAgentCard:
 
         result = dns_registry.get_agent_card("http://localhost:8080", "agdns:abc")
         assert result is not None
-        mock_get.assert_called_once_with("http://localhost:8080/v1/agents/agdns:abc/card")
+        mock_get.assert_called_once_with("http://localhost:8080/v1/entities/agdns:abc/card")
 
     @patch("zyndai_agent.dns_registry.requests.get")
     def test_get_card_not_found(self, mock_get):

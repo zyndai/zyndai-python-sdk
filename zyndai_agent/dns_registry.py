@@ -19,7 +19,7 @@ def register_agent(
     registry_url: str,
     keypair: Ed25519Keypair,
     name: str,
-    agent_url: str,
+    entity_url: str = "",
     category: str = "general",
     tags: Optional[List[str]] = None,
     summary: Optional[str] = None,
@@ -31,35 +31,33 @@ def register_agent(
     entity_type: Optional[str] = None,
     service_endpoint: Optional[str] = None,
     openapi_url: Optional[str] = None,
-    pricing_model: Optional[dict] = None,
+    entity_pricing: Optional[dict] = None,
 ) -> str:
     """
     Register an agent or service on the registry.
 
-    Builds signable payload, signs with Ed25519 key, and POSTs to /v1/agents
-    (or /v1/services for type=service).
+    Builds signable payload, signs with Ed25519 key, and POSTs to /v1/entities.
 
     Returns:
         entity_id: The registered agent/service ID
     """
     # Build signable payload (sorted keys to match Go's json.Marshal)
-    signable = {
-        "agent_url": agent_url or "",
+    signable: dict = {
         "category": category,
+        "entity_url": entity_url or "",
         "name": name,
         "public_key": keypair.public_key_string,
         "summary": summary or "",
         "tags": tags or [],
     }
     if entity_type:
-        signable["type"] = entity_type
+        signable["entity_type"] = entity_type
     signable_bytes = json.dumps(signable, sort_keys=True, separators=(",", ":")).encode()
     signature = sign(keypair.private_key, signable_bytes)
 
-    # Build full registration request
-    body = {
+    body: dict = {
         "name": name,
-        "agent_url": agent_url or "",
+        "entity_url": entity_url or "",
         "category": category,
         "tags": tags or [],
         "summary": summary or "",
@@ -68,13 +66,13 @@ def register_agent(
     }
 
     if entity_type:
-        body["type"] = entity_type
+        body["entity_type"] = entity_type
     if service_endpoint:
         body["service_endpoint"] = service_endpoint
     if openapi_url:
         body["openapi_url"] = openapi_url
-    if pricing_model:
-        body["pricing_model"] = pricing_model
+    if entity_pricing:
+        body["entity_pricing"] = entity_pricing
     if capability_summary:
         body["capability_summary"] = capability_summary
     if developer_id:
@@ -86,10 +84,8 @@ def register_agent(
     if version:
         body["version"] = version
 
-    # Use unified /v1/entities endpoint
-    endpoint = "/v1/entities"
     resp = requests.post(
-        f"{registry_url}{endpoint}",
+        f"{registry_url}/v1/entities",
         json=body,
         headers={"Content-Type": "application/json"},
     )
@@ -101,7 +97,7 @@ def register_agent(
         )
 
     data = resp.json()
-    return data.get("agent_id", keypair.agent_id)
+    return data.get("entity_id", data.get("agent_id", keypair.agent_id))
 
 
 def check_handle_available(registry_url: str, handle: str) -> dict:
@@ -310,7 +306,7 @@ def search_agents(
     if fqan:
         body["fqan"] = fqan
     if entity_type:
-        body["type"] = entity_type
+        body["entity_type"] = entity_type
     if offset:
         body["offset"] = offset
     if timeout_ms is not None:

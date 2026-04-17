@@ -265,7 +265,7 @@ def _service_register(args: argparse.Namespace):
                 registry_url=registry_url,
                 keypair=kp,
                 name=config["name"],
-                agent_url="",
+                entity_url="",
                 category=config.get("category", "general"),
                 tags=config.get("tags", []),
                 summary=config.get("summary", ""),
@@ -275,7 +275,7 @@ def _service_register(args: argparse.Namespace):
                 entity_type="service",
                 service_endpoint=config.get("service_endpoint"),
                 openapi_url=config.get("openapi_url"),
-                pricing_model=config.get("pricing_model"),
+                entity_pricing=config.get("entity_pricing"),
             )
             fqan = get_agent_fqan(registry_url, service_id)
             print(f"\n  Service registered!")
