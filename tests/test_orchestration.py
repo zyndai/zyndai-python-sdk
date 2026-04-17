@@ -119,7 +119,7 @@ class TestFanOut:
     @pytest.fixture
     def mock_agent(self):
         agent = MagicMock()
-        agent.agent_id = "coordinator-1"
+        agent.entity_id = "coordinator-1"
         agent.keypair = None
         agent.x402_processor.session = MagicMock()
         return agent
@@ -217,7 +217,7 @@ class TestCoordinator:
     @pytest.fixture
     def mock_agent(self):
         agent = MagicMock()
-        agent.agent_id = "coord-1"
+        agent.entity_id = "coord-1"
         agent.keypair = None
         agent.x402_processor.session = MagicMock()
         agent.search_agents = MagicMock(return_value=[])

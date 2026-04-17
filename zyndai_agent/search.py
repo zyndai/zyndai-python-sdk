@@ -99,7 +99,7 @@ class SearchAndDiscoveryManager:
 
     def search_agents_by_capabilities(
         self,
-        capabilities: List[str] = [],
+        capabilities: Optional[List[str]] = None,
         top_k: Optional[int] = None
     ) -> List[AgentSearchResponse]:
         """
@@ -113,6 +113,8 @@ class SearchAndDiscoveryManager:
         Returns:
             List of matching agents
         """
+        if capabilities is None:
+            capabilities = []
         logger.info(f"Discovering agents by capabilities: {capabilities}")
 
         # Convert capabilities to both query and skills

@@ -1,12 +1,8 @@
-import asyncio
 import base64
-import hashlib
 import json
 import logging
 import os
 import threading
-import time
-import requests
 from zyndai_agent.search import SearchAndDiscoveryManager
 from zyndai_agent.identity import IdentityManager
 from zyndai_agent.communication import AgentCommunicationManager
@@ -17,18 +13,10 @@ from zyndai_agent.ed25519_identity import (
     Ed25519Keypair,
     keypair_from_private_bytes,
 )
-from zyndai_agent.entity_card import build_entity_card, sign_entity_card
 from zyndai_agent.entity_card_loader import (
-    load_entity_card,
     resolve_keypair,
-    build_runtime_card,
-    compute_card_hash,
-    resolve_card_from_config,
-    load_derivation_metadata,
 )
 from zyndai_agent.base import ZyndBase, ZyndBaseConfig, _console, _log, _log_ok, _log_warn, _log_err, _log_heartbeat
-from zyndai_agent import dns_registry
-from pydantic import BaseModel
 from typing import Optional, Any, Callable, Union, List
 from enum import Enum
 

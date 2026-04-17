@@ -184,7 +184,7 @@ async def fan_out(
 
             msg = InvokeMessage(
                 conversation_id=conversation_id,
-                sender_id=getattr(agent, "agent_id", "unknown"),
+                sender_id=getattr(agent, "entity_id", "unknown"),
                 sender_public_key=getattr(agent.keypair, "public_key_string", None) if getattr(agent, "keypair", None) else None,
                 capability=capability,
                 payload={"task": description},
