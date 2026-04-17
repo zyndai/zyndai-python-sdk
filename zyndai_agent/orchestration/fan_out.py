@@ -145,7 +145,8 @@ async def fan_out(
                                 )
                             if resp.status_code < 400:
                                 break
-                        except Exception:
+                        except Exception as e:
+                            logger.debug(f"Service probe failed for {attempt_url}: {e}")
                             continue
 
                     if resp is None:

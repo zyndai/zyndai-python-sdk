@@ -47,10 +47,10 @@ class ConfigManager:
             with open(config_path, "r") as f:
                 config = json.load(f)
         except json.JSONDecodeError:
-            print(f"Warning: {config_path} is corrupted. Creating a new agent...")
+            logger.warning(f"Warning: {config_path} is corrupted. Creating a new agent...")
             return None
 
-        print(f"Loaded agent config from {config_path}")
+        logger.info(f"Loaded agent config from {config_path}")
         return config
 
     @staticmethod
@@ -63,7 +63,7 @@ class ConfigManager:
         with open(config_path, "w") as f:
             json.dump(config, f, indent=2)
 
-        print(f"Saved agent config to {config_path}")
+        logger.info(f"Saved agent config to {config_path}")
 
     @staticmethod
     def _is_legacy_config(config: dict) -> bool:
@@ -77,7 +77,7 @@ class ConfigManager:
 
         Preserves old seed as 'legacy_seed' for x402 payment continuity.
         """
-        print("Detected legacy v1 config. Migrating to v2 (agent-dns)...")
+        logger.info("Detected legacy v1 config. Migrating to v2 (agent-dns)...")
 
         # Generate new Ed25519 keypair
         kp = generate_keypair()
@@ -99,9 +99,9 @@ class ConfigManager:
                 tags=getattr(agent_config, "tags", None),
                 summary=getattr(agent_config, "summary", None),
             )
-            print(f"Registered migrated agent on agent-dns: {entity_id}")
+            logger.info(f"Registered migrated agent on agent-dns: {entity_id}")
         except Exception as e:
-            print(f"Warning: Could not register on agent-dns during migration: {e}")
+            logger.warning(f"Could not register on agent-dns during migration: {e}")
 
         new_config = {
             "schema_version": "2.0",
@@ -159,8 +159,8 @@ class ConfigManager:
                 summary=getattr(agent_config, "summary", None),
             )
         except Exception as e:
-            print(f"Warning: Could not register on agent-dns: {e}")
-            print("Agent will operate with local identity only.")
+            logger.warning(f"Could not register on agent-dns: {e}")
+            logger.warning("Agent will operate with local identity only.")
 
         config = {
             "schema_version": "2.0",
@@ -211,7 +211,7 @@ class ConfigManager:
             raise ValueError("capabilities is required in AgentConfig to create a new agent.")
 
         dir_name = config_dir or ConfigManager.DEFAULT_CONFIG_DIR
-        print(f"No {dir_name}/config.json found. Creating a new agent...")
+        logger.info(f"No {dir_name}/config.json found. Creating a new agent...")
         return ConfigManager.create_agent(
             agent_config=agent_config,
             config_dir=config_dir,

@@ -279,6 +279,9 @@ class EntityRunner:
                 console.print(
                     f"  [bold red]✗[/bold red] Registration failed: {e}"
                 )
+                console.print(
+                    f"  [dim]⚠ Entity is running locally but NOT discoverable on the network[/dim]"
+                )
 
         # --- Step 5: wait for exit -----------------------------------
         console.print()

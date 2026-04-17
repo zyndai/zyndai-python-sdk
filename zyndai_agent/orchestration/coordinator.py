@@ -103,7 +103,7 @@ class Coordinator:
                     asyncio.run,
                     self.execute(strategy_name, task_description, **kwargs),
                 )
-                return future.result(timeout=self.default_timeout * 2)
+                return future.result(timeout=kwargs.get("timeout") or self.default_timeout)
         else:
             return asyncio.run(
                 self.execute(strategy_name, task_description, **kwargs)

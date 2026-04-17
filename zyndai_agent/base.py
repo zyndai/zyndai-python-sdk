@@ -196,10 +196,11 @@ class ZyndBase(
         """Resolve keypair from env vars or config.keypair_path."""
         env_var = "ZYND_SERVICE_KEYPAIR_PATH" if entity_type == "service" else "ZYND_AGENT_KEYPAIR_PATH"
         env_path = os.environ.get(env_var)
+        kp_config = config
         if env_path:
-            config.keypair_path = env_path
+            kp_config = config.model_copy(update={"keypair_path": env_path})
         try:
-            return resolve_keypair(config)
+            return resolve_keypair(kp_config)
         except ValueError:
             return None
 
