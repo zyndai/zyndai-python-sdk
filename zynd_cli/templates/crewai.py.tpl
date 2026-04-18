@@ -80,6 +80,7 @@ if __name__ == "__main__":
         webhook_port=_config.get("webhook_port", 5000),
         registry_url=os.environ.get("ZYND_REGISTRY_URL", _config.get("registry_url", "http://localhost:8080")),
         keypair_path=os.environ.get("ZYND_AGENT_KEYPAIR_PATH", _config.get("keypair_path")),
+        entity_url=os.environ.get("ZYND_ENTITY_URL", _config.get("entity_url")),
         price=_config.get("price"),
         entity_pricing=_config.get("entity_pricing"),
     )

@@ -219,13 +219,35 @@ class ConfigManager:
 
 
 def _build_entity_url(agent_config) -> str:
-    """Build the agent URL from webhook config."""
-    if getattr(agent_config, "webhook_url", None):
-        url = agent_config.webhook_url
-        # Strip /webhook suffix to get base URL
+    """Build the public URL advertised to the registry.
+
+    Precedence:
+      1. ``entity_url`` — explicit public URL (preferred). Used by hosting
+         layers such as zynd-deployer to advertise an HTTPS endpoint while
+         the webhook server still binds to 0.0.0.0:5000 inside the process.
+      2. ``webhook_url`` — deprecated alias for ``entity_url``. A warning is
+         logged when this is used without ``entity_url`` also being set.
+      3. Fallback: derived from ``webhook_host`` / ``webhook_port``. When
+         ``webhook_host == "0.0.0.0"`` we map that to ``localhost`` so the
+         URL is dereferenceable; scheme is ``https`` only for port 443.
+    """
+    entity_url = getattr(agent_config, "entity_url", None)
+    if entity_url:
+        url = entity_url
         if url.endswith("/webhook"):
             return url[: -len("/webhook")]
-        return url
+        return url.rstrip("/")
+
+    webhook_url = getattr(agent_config, "webhook_url", None)
+    if webhook_url:
+        logger.warning(
+            "ZyndBaseConfig.webhook_url is deprecated; rename it to "
+            "entity_url. Support for webhook_url will be removed in a "
+            "future release."
+        )
+        if webhook_url.endswith("/webhook"):
+            return webhook_url[: -len("/webhook")]
+        return webhook_url.rstrip("/")
 
     host = getattr(agent_config, "webhook_host", "0.0.0.0")
     port = getattr(agent_config, "webhook_port", 5000)

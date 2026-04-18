@@ -187,7 +187,12 @@ class EntityRunner:
             f"  [bold #8B5CF6]▶[/bold #8B5CF6] Starting "
             f"[bold]{config.get('name', self.label.lower())}[/bold]..."
         )
-        proc = self._spawn(kp_path, registry_url, getattr(args, "port", None))
+        proc = self._spawn(
+            kp_path,
+            registry_url,
+            getattr(args, "port", None),
+            entity_url=getattr(args, "entity_url", None),
+        )
 
         # --- Step 2: health check ------------------------------------
         console.print(
@@ -326,12 +331,18 @@ class EntityRunner:
         kp_path: str,
         registry_url: str,
         port_override: Optional[int],
+        entity_url: Optional[str] = None,
     ) -> subprocess.Popen:
         env = os.environ.copy()
         env[self.keypair_env] = kp_path
         env["ZYND_REGISTRY_URL"] = registry_url
         if port_override:
             env["ZYND_WEBHOOK_PORT"] = str(port_override)
+        # Forward the public URL to the child so the SDK can advertise it
+        # via `entity_url` in the Agent Card and registry record. Hosting
+        # layers (zynd-deployer) set this to the HTTPS URL of the deployment.
+        if entity_url:
+            env["ZYND_ENTITY_URL"] = entity_url
         return subprocess.Popen(
             [sys.executable, self.script_name],
             env=env,
