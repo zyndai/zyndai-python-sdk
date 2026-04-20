@@ -2,7 +2,9 @@ import time
 import json
 import uuid
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Type
+
+from zyndai_agent.payload import AgentPayload, Attachment
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,8 @@ class AgentMessage:
         conversation_id: Optional[str] = None,
         in_reply_to: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        attachments: Optional[list[Attachment]] = None,
+        payload: Optional[AgentPayload] = None,
     ):
         """
         Initialize a new agent message.
@@ -55,6 +59,12 @@ class AgentMessage:
         self.conversation_id = conversation_id or str(uuid.uuid4())
         self.in_reply_to = in_reply_to
         self.metadata = metadata or {}
+        self.attachments = attachments or []
+        # The validated Pydantic payload — handlers should access custom
+        # fields (declared on their RequestPayload subclass) through this
+        # attribute, e.g. `message.payload.pdfs`. None only for messages
+        # constructed directly via the legacy constructor path.
+        self.payload = payload
         self.timestamp = time.time()
 
     def to_dict(self) -> Dict[str, Any]:
@@ -71,6 +81,7 @@ class AgentMessage:
             "conversation_id": self.conversation_id,
             "in_reply_to": self.in_reply_to,
             "metadata": self.metadata,
+            "attachments": [a.model_dump(exclude_none=True) for a in self.attachments],
             "timestamp": self.timestamp
         }
         return d
@@ -80,19 +91,37 @@ class AgentMessage:
         return json.dumps(self.to_dict())
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'AgentMessage':
-        """Create message object from dictionary data."""
+    def from_dict(
+        cls,
+        data: Dict[str, Any],
+        payload_model: Type[AgentPayload] = AgentPayload,
+    ) -> 'AgentMessage':
+        """Create message object from dictionary data.
+
+        Validates incoming data against `payload_model` (the default
+        `AgentPayload` schema, or a developer-supplied subclass).
+        """
+        payload = payload_model.model_validate(data or {})
         return cls(
-            content=data.get("prompt", data.get("content", "")),
-            sender_id=data.get("sender_id", "unknown"),
-            sender_did=data.get("sender_did", "unknown"),
-            sender_public_key=data.get("sender_public_key"),
-            receiver_id=data.get("receiver_id"),
-            message_type=data.get("message_type", "query"),
-            message_id=data.get("message_id"),
-            conversation_id=data.get("conversation_id"),
-            in_reply_to=data.get("in_reply_to"),
-            metadata=data.get("metadata", {})
+            content=payload.content,
+            sender_id=payload.sender_id,
+            sender_did=payload.sender_did,
+            sender_public_key=payload.sender_public_key,
+            receiver_id=payload.receiver_id,
+            message_type=payload.message_type,
+            message_id=payload.message_id,
+            conversation_id=payload.conversation_id,
+            in_reply_to=payload.in_reply_to,
+            metadata=payload.metadata,
+            # Only surface attachments when the payload model explicitly
+            # declared the field — extras carrying raw dicts shouldn't leak
+            # into handlers as if they'd been validated.
+            attachments=(
+                payload.attachments
+                if "attachments" in getattr(payload_model, "model_fields", {})
+                else []
+            ),
+            payload=payload,
         )
 
     @classmethod

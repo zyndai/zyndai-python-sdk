@@ -173,6 +173,13 @@ def _service_init(args: argparse.Namespace):
         with open("service.py", "w") as f:
             f.write(content)
 
+    # Editable payload schema — service.py imports `RequestPayload` from this
+    # file, and edits here flow into /.well-known/agent.json on next boot.
+    payload_tpl = tpl_dir / "payload.py.tpl"
+    if payload_tpl.exists() and not Path("payload.py").exists():
+        with open("payload.py", "w") as f:
+            f.write(payload_tpl.read_text().replace("__AGENT_NAME__", name))
+
     well_known = Path(".well-known")
     well_known.mkdir(exist_ok=True)
     with open(well_known / "agent.json", "w") as f:
@@ -197,7 +204,8 @@ def _service_init(args: argparse.Namespace):
     print(f"    Keypair:    {kp_path}")
     print(f"\n  Next steps:")
     print(f"    1. Edit service.py with your service logic")
-    print(f"    2. zynd service run   (registers on first run, updates on subsequent runs)")
+    print(f"    2. Edit payload.py to declare your request schema (optional)")
+    print(f"    3. zynd service run   (registers on first run, updates on subsequent runs)")
 
 
 def _service_run(args: argparse.Namespace):

@@ -266,6 +266,13 @@ def _agent_init(args: argparse.Namespace):
     else:
         console.print(f"  [yellow]Warning: Template not found: {tpl_name}[/yellow]")
 
+    # 8b. Create payload.py — the editable Pydantic schema. The agent imports
+    # `RequestPayload` and `MAX_FILE_SIZE_BYTES` from this file, so edits here
+    # flow into /.well-known/agent.json on next boot.
+    payload_tpl = Path(__file__).parent.parent / "templates" / "payload.py.tpl"
+    if payload_tpl.exists() and not os.path.exists("payload.py"):
+        _write_file("payload.py", payload_tpl.read_text().replace("__AGENT_NAME__", name))
+
     # 9. Create .well-known/ directory
     os.makedirs(".well-known", exist_ok=True)
     _write_file(".well-known/agent.json", json.dumps(
@@ -277,6 +284,7 @@ def _agent_init(args: argparse.Namespace):
     console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] agent.config.json")
     console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] .env")
     console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] agent.py")
+    console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] payload.py")
     console.print(f"  [bold #8B5CF6]✓[/bold #8B5CF6] .well-known/agent.json")
 
     # 10. Summary

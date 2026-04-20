@@ -4,6 +4,7 @@ from zyndai_agent.service import ZyndService, ServiceConfig
 from zyndai_agent.communication import AgentCommunicationManager, MQTTMessage
 from zyndai_agent.webhook_communication import WebhookCommunicationManager
 from zyndai_agent.message import AgentMessage
+from zyndai_agent.payload import AgentPayload, Attachment
 from zyndai_agent.search import SearchAndDiscoveryManager, AgentSearchResponse
 from zyndai_agent.identity import IdentityManager
 from zyndai_agent.payment import X402PaymentProcessor
@@ -31,6 +32,8 @@ __all__ = [
     "WebhookCommunicationManager",
     "MQTTMessage",
     "AgentMessage",
+    "AgentPayload",
+    "Attachment",
     "SearchAndDiscoveryManager",
     "AgentSearchResponse",
     "IdentityManager",

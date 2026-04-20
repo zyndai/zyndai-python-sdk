@@ -11,6 +11,8 @@ Run:
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.message import AgentMessage
 
+from payload import RequestPayload, MAX_FILE_SIZE_BYTES
+
 from dotenv import load_dotenv
 import json
 import os
@@ -85,7 +87,11 @@ if __name__ == "__main__":
         entity_pricing=_config.get("entity_pricing"),
     )
 
-    zynd_agent = ZyndAIAgent(agent_config=agent_config)
+    zynd_agent = ZyndAIAgent(
+        agent_config=agent_config,
+        payload_model=RequestPayload,
+        max_file_size_bytes=MAX_FILE_SIZE_BYTES,
+    )
     crew = create_crew()
     zynd_agent.set_crewai_agent(crew)
 

@@ -10,6 +10,8 @@ Run:
 
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.message import AgentMessage
+
+from payload import RequestPayload, MAX_FILE_SIZE_BYTES
 from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langgraph.graph import StateGraph, MessagesState, START, END
@@ -72,7 +74,11 @@ if __name__ == "__main__":
         entity_pricing=_config.get("entity_pricing"),
     )
 
-    zynd_agent = ZyndAIAgent(agent_config=agent_config)
+    zynd_agent = ZyndAIAgent(
+        agent_config=agent_config,
+        payload_model=RequestPayload,
+        max_file_size_bytes=MAX_FILE_SIZE_BYTES,
+    )
     langgraph_agent = create_agent()
     zynd_agent.set_langgraph_agent(langgraph_agent)
 

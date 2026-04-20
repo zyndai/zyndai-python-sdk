@@ -3,6 +3,9 @@ __SERVICE_NAME__ — Service on Zynd Network
 """
 
 from zyndai_agent.service import ServiceConfig, ZyndService
+
+from payload import RequestPayload, MAX_FILE_SIZE_BYTES
+
 from dotenv import load_dotenv
 import json
 import os
@@ -53,7 +56,11 @@ if __name__ == "__main__":
         entity_pricing=_config.get("entity_pricing"),
     )
 
-    service = ZyndService(service_config=config)
+    service = ZyndService(
+        service_config=config,
+        payload_model=RequestPayload,
+        max_file_size_bytes=MAX_FILE_SIZE_BYTES,
+    )
     service.set_handler(handle_request)
 
     print(f"\n__SERVICE_NAME__ is running")
