@@ -65,6 +65,7 @@ def register_parser(subparsers: argparse._SubParsersAction, parents=None):
         "--config", default="service.config.json", help="Path to service.config.json"
     )
     run_p.add_argument("--port", type=int, help="Override webhook port")
+    run_p.add_argument("--entity-url", help="Override entity URL for registration")
     run_p.set_defaults(func=_service_run)
 
     p.set_defaults(func=_service_help)

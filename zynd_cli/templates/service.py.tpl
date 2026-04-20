@@ -48,6 +48,7 @@ if __name__ == "__main__":
             "ZYND_SERVICE_KEYPAIR_PATH",
             _config.get("keypair_path"),
         ),
+        entity_url=os.environ.get("ZYND_ENTITY_URL", _config.get("entity_url")),
         price=_config.get("price"),
         entity_pricing=_config.get("entity_pricing"),
     )

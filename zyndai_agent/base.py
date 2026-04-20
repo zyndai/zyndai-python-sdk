@@ -61,9 +61,19 @@ class ZyndBaseConfig(BaseModel):
     message_history_limit: int = 100
     registry_url: str = "http://localhost:8080"
 
-    # Webhook
+    # Webhook — bind config inside the process
     webhook_host: Optional[str] = "0.0.0.0"
     webhook_port: Optional[int] = 5000
+
+    # Public URL advertised to the registry and used to build the Agent
+    # Card at /.well-known/zynd-agent.json. When set, this takes precedence
+    # over host/port derivation. Used by hosting layers (e.g. zynd-deployer)
+    # to inject an HTTPS URL while the container still binds to 0.0.0.0:5000.
+    entity_url: Optional[str] = None
+
+    # Deprecated: use `entity_url` instead. Retained for one release for
+    # backward compatibility; `_build_entity_url` emits a warning when only
+    # this field is set.
     webhook_url: Optional[str] = None
 
     # Registry fields
@@ -161,13 +171,24 @@ class ZyndBase(
                 currency = config.entity_pricing.get("currency") or "USDC"
                 runtime_price = f"${base} {currency}"
 
+        # Resolve the public-facing URL, honoring the new `entity_url` field
+        # (preferred) and the deprecated `webhook_url` alias. When either is
+        # explicitly set we hand the "/webhook"-suffixed shape straight to
+        # WebhookCommunicationManager; when BOTH are unset we leave it None
+        # so the server-start path can still auto-derive using the actual
+        # bound port (important if port 5000 is taken and the server falls
+        # through to 5001/5002/etc. during local dev).
+        _public_webhook_url = config.webhook_url
+        if getattr(config, "entity_url", None):
+            _public_webhook_url = f"{config.entity_url.rstrip('/')}/webhook"
+
         # Start webhook server
         WebhookCommunicationManager.__init__(
             self,
             entity_id=self.entity_id,
             webhook_host=config.webhook_host,
             webhook_port=config.webhook_port,
-            webhook_url=config.webhook_url,
+            webhook_url=_public_webhook_url,
             auto_restart=config.auto_reconnect,
             message_history_limit=config.message_history_limit,
             identity_credential=None,
@@ -205,10 +226,25 @@ class ZyndBase(
             return None
 
     def _get_base_url(self) -> str:
-        webhook_url = getattr(self, "webhook_url", None) or ""
-        if webhook_url.endswith("/webhook"):
-            return webhook_url[:-8]
-        return webhook_url
+        """Return the public base URL used by the Agent Card builder.
+
+        Delegates to ``_build_entity_url`` so the precedence
+        (``entity_url`` → deprecated ``webhook_url`` → host/port derivation)
+        stays in one place. Falls back to the WebhookCommunicationManager's
+        resolved ``webhook_url`` if the config-level helper returns nothing,
+        which can happen on the very first call before config propagation.
+        """
+        from zyndai_agent.config_manager import _build_entity_url
+
+        try:
+            url = _build_entity_url(self._config) or ""
+        except Exception:
+            url = ""
+        if not url:
+            url = getattr(self, "webhook_url", None) or ""
+        if url.endswith("/webhook"):
+            return url[: -len("/webhook")]
+        return url.rstrip("/")
 
     def _write_card_file(self):
         """Write .well-known/agent.json to disk."""
