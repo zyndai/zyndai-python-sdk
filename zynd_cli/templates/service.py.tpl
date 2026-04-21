@@ -4,7 +4,7 @@ __SERVICE_NAME__ — Service on Zynd Network
 
 from zyndai_agent.service import ServiceConfig, ZyndService
 
-from payload import RequestPayload, MAX_FILE_SIZE_BYTES
+from payload import RequestPayload, ResponsePayload, MAX_FILE_SIZE_BYTES
 
 from dotenv import load_dotenv
 import json
@@ -59,6 +59,7 @@ if __name__ == "__main__":
     service = ZyndService(
         service_config=config,
         payload_model=RequestPayload,
+        output_model=ResponsePayload,
         max_file_size_bytes=MAX_FILE_SIZE_BYTES,
     )
     service.set_handler(handle_request)

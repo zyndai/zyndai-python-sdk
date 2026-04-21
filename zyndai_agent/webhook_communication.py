@@ -3,7 +3,7 @@ import logging
 import threading
 import requests
 from flask import Flask, request, jsonify
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from typing import List, Callable, Optional, Dict, Any
 from zyndai_agent.message import AgentMessage
 from zyndai_agent.search import AgentSearchResponse
@@ -634,16 +634,63 @@ class WebhookCommunicationManager:
         """Alias for add_message_handler for backward compatibility."""
         self.add_message_handler(handler_fn)
 
-    def set_response(self, message_id: str, response: str):
-        """
-        Set a response for a specific message ID (for synchronous responses).
+    def set_response(self, message_id: str, response):
+        """Set the sync response for a webhook request.
 
-        Args:
-            message_id: The ID of the message being responded to
-            response: The response content
+        `response` may be:
+          - a str: sent as-is (legacy behavior, no validation)
+          - a dict: serialized to JSON; validated against `output_model`
+            if the agent declared one
+          - a Pydantic BaseModel: serialized via model_dump_json; coerced
+            through `output_model` if declared and the instance is a
+            different class
+
+        Validation failures are converted to an error response (so the
+        caller gets a clean 500 with details) rather than raised — the
+        webhook handler is still waiting on this slot.
         """
+        import json as _json
+        output_model = getattr(self, "output_model", None)
+
+        if isinstance(response, str):
+            final = response
+        elif isinstance(response, BaseModel):
+            if output_model is not None and not isinstance(response, output_model):
+                try:
+                    response = output_model.model_validate(response.model_dump())
+                except ValidationError as e:
+                    logger.error(
+                        f"[{self.entity_id}] handler output failed {output_model.__name__} validation"
+                    )
+                    final = _json.dumps({
+                        "error": "handler_output_invalid",
+                        "details": e.errors(include_url=False, include_context=False),
+                    })
+                    with self._lock:
+                        self.pending_responses[message_id] = final
+                    return
+            final = response.model_dump_json()
+        elif isinstance(response, dict):
+            if output_model is not None:
+                try:
+                    validated = output_model.model_validate(response)
+                    final = validated.model_dump_json()
+                except ValidationError as e:
+                    logger.error(
+                        f"[{self.entity_id}] handler output failed {output_model.__name__} validation"
+                    )
+                    final = _json.dumps({
+                        "error": "handler_output_invalid",
+                        "details": e.errors(include_url=False, include_context=False),
+                    })
+            else:
+                final = _json.dumps(response)
+        else:
+            # Anything else — stringify (rare; keeps the door open).
+            final = str(response)
+
         with self._lock:
-            self.pending_responses[message_id] = response
+            self.pending_responses[message_id] = final
         logger.info(f"[{self.entity_id}] Set response for message {message_id}")
 
     def get_connection_status(self) -> Dict[str, Any]:

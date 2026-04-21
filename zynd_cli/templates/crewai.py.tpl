@@ -11,7 +11,7 @@ Run:
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.message import AgentMessage
 
-from payload import RequestPayload, MAX_FILE_SIZE_BYTES
+from payload import RequestPayload, ResponsePayload, MAX_FILE_SIZE_BYTES
 
 from dotenv import load_dotenv
 import json
@@ -90,6 +90,7 @@ if __name__ == "__main__":
     zynd_agent = ZyndAIAgent(
         agent_config=agent_config,
         payload_model=RequestPayload,
+        output_model=ResponsePayload,
         max_file_size_bytes=MAX_FILE_SIZE_BYTES,
     )
     crew = create_crew()

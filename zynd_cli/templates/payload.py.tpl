@@ -1,12 +1,12 @@
 """
-Request payload schema for __AGENT_NAME__.
+Request + response schemas for __AGENT_NAME__.
 
-Edit `RequestPayload` to declare the fields your agent expects. The JSON Schema
-is automatically advertised at /.well-known/agent.json so callers can
-discover what to send. Plain `{"content": "..."}` requests keep working as
-long as you leave `content` in the model (or don't mark new fields required).
+Edit `RequestPayload` to declare what callers send, and `ResponsePayload`
+to declare what they receive. Both JSON Schemas are auto-advertised at
+/.well-known/agent.json (as `input_schema` and `output_schema`) so callers
+can discover the contract without reading your code.
 
-Examples (uncomment and adapt as needed):
+RequestPayload examples (uncomment and adapt):
 
     from typing import Literal
     from pydantic import Field
@@ -23,7 +23,16 @@ Examples (uncomment and adapt as needed):
             min_length=1,
             json_schema_extra={"accepted_mime_types": ["application/pdf"]},
         )
+
+ResponsePayload examples:
+
+    class ResponsePayload(BaseModel):
+        status: Literal["ok", "error"]
+        user_id: str
+        message: str
 """
+
+from pydantic import BaseModel, ConfigDict
 
 from zyndai_agent import AgentPayload, Attachment
 
@@ -41,6 +50,19 @@ class RequestPayload(AgentPayload):
     """
 
     pass
+
+
+class ResponsePayload(BaseModel):
+    """Schema for responses this agent sends back.
+
+    Starts permissive (`extra="allow"`, no required fields) so handlers that
+    return arbitrary dicts keep working. Tighten it by adding required fields
+    once your response shape is stable — the SDK will then validate every
+    response against this model before shipping it, catching handler bugs
+    with a clear error instead of surprising callers.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
 
 # Cap on the total /webhook request body size. Bounds how big an inline

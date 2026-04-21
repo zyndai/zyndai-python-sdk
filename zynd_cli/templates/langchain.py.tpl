@@ -11,7 +11,7 @@ Run:
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.message import AgentMessage
 
-from payload import RequestPayload, MAX_FILE_SIZE_BYTES
+from payload import RequestPayload, ResponsePayload, MAX_FILE_SIZE_BYTES
 from langchain_openai import ChatOpenAI
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -77,6 +77,7 @@ if __name__ == "__main__":
     zynd_agent = ZyndAIAgent(
         agent_config=agent_config,
         payload_model=RequestPayload,
+        output_model=ResponsePayload,
         max_file_size_bytes=MAX_FILE_SIZE_BYTES,
     )
     agent_executor = create_agent()

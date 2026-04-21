@@ -6,12 +6,13 @@ continue to parse exactly as before.
 """
 
 import base64
+import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import patch
 
 import pytest
-from pydantic import Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from zyndai_agent import AgentMessage, AgentPayload, Attachment
 from zyndai_agent.payload import build_payload_card_fields
@@ -492,6 +493,59 @@ class TestMultipartWebhook:
 # ---------------------------------------------------------------------------
 
 
+class TestOutputSchemaValidation:
+    """The SDK validates handler responses against `output_model` when
+    declared, serializes Pydantic instances cleanly, and converts validation
+    failures into a structured error response."""
+
+    class _Out(BaseModel):
+        ok: bool
+        message: str
+
+    def _mgr(self, output_model=None):
+        with patch.object(WebhookCommunicationManager, "start_webhook_server"):
+            mgr = WebhookCommunicationManager(
+                entity_id="out-test",
+                webhook_host="127.0.0.1",
+                webhook_port=16300,
+                webhook_url="http://127.0.0.1:16300/webhook",
+                identity_credential=None, keypair=None,
+                price=None, pay_to_address=None,
+            )
+            mgr.output_model = output_model
+            mgr.is_running = True
+            return mgr
+
+    def test_legacy_string_response_passes_through(self):
+        mgr = self._mgr(output_model=self._Out)
+        mgr.set_response("m1", "plain string")
+        assert mgr.pending_responses["m1"] == "plain string"
+
+    def test_dict_response_validated_and_serialized(self):
+        mgr = self._mgr(output_model=self._Out)
+        mgr.set_response("m2", {"ok": True, "message": "done"})
+        body = json.loads(mgr.pending_responses["m2"])
+        assert body == {"ok": True, "message": "done"}
+
+    def test_invalid_dict_response_becomes_error(self):
+        mgr = self._mgr(output_model=self._Out)
+        mgr.set_response("m3", {"ok": "not-a-bool"})  # wrong type + missing message
+        body = json.loads(mgr.pending_responses["m3"])
+        assert body["error"] == "handler_output_invalid"
+        assert len(body["details"]) >= 1
+
+    def test_pydantic_instance_response_serialized(self):
+        mgr = self._mgr(output_model=self._Out)
+        mgr.set_response("m4", self._Out(ok=True, message="yay"))
+        body = json.loads(mgr.pending_responses["m4"])
+        assert body == {"ok": True, "message": "yay"}
+
+    def test_dict_without_output_model_still_json_dumps(self):
+        mgr = self._mgr(output_model=None)
+        mgr.set_response("m5", {"anything": 1})
+        assert json.loads(mgr.pending_responses["m5"]) == {"anything": 1}
+
+
 class TestAgentJsonAdvertisement:
     def test_default_model_does_not_advertise_files(self):
         # Attachments are opt-in — agents that don't declare any
@@ -519,6 +573,22 @@ class TestAgentJsonAdvertisement:
         fields = build_payload_card_fields(Resume)
         assert fields["accepts_files"] is True
         assert fields["accepted_mime_types"] == ["application/pdf"]
+
+    def test_output_schema_advertised_when_output_model_set(self):
+        class Req(AgentPayload):
+            pass
+        class Res(BaseModel):
+            status: str
+            count: int
+
+        fields = build_payload_card_fields(Req, output_model=Res)
+        assert "output_schema" in fields
+        assert set(fields["output_schema"]["properties"].keys()) == {"status", "count"}
+        assert set(fields["output_schema"].get("required", [])) == {"status", "count"}
+
+    def test_output_schema_absent_when_no_output_model(self):
+        fields = build_payload_card_fields(AgentPayload)
+        assert "output_schema" not in fields
 
     def test_mime_types_aggregate_across_multiple_attachment_fields(self):
         class Multi(AgentPayload):
