@@ -112,6 +112,9 @@ def build_runtime_card(
     static_card: dict,
     base_url: str,
     keypair: Ed25519Keypair,
+    payload_model=None,
+    output_model=None,
+    max_file_size_bytes: Optional[int] = None,
 ) -> dict:
     """
     Merge a static card (from file) with runtime fields to produce a serveable card.
@@ -152,6 +155,14 @@ def build_runtime_card(
     card["status"] = "online"
     card["last_heartbeat"] = now
     card["signed_at"] = now
+
+    # Advertise the request payload schema (JSON Schema) so callers can
+    # discover what fields + attachment types this agent accepts.
+    if payload_model is not None:
+        from zyndai_agent.payload import build_payload_card_fields
+        card.update(build_payload_card_fields(payload_model, output_model))
+        if max_file_size_bytes is not None:
+            card["max_file_size_bytes"] = max_file_size_bytes
 
     # Sign the card
     return sign_entity_card(card, keypair)

@@ -11,6 +11,8 @@ Run:
 from zyndai_agent.agent import AgentConfig, ZyndAIAgent
 from zyndai_agent.message import AgentMessage
 
+from payload import RequestPayload, ResponsePayload, MAX_FILE_SIZE_BYTES
+
 from dotenv import load_dotenv
 import json
 import os
@@ -64,7 +66,12 @@ if __name__ == "__main__":
         entity_pricing=_config.get("entity_pricing"),
     )
 
-    zynd_agent = ZyndAIAgent(agent_config=agent_config)
+    zynd_agent = ZyndAIAgent(
+        agent_config=agent_config,
+        payload_model=RequestPayload,
+        output_model=ResponsePayload,
+        max_file_size_bytes=MAX_FILE_SIZE_BYTES,
+    )
     pydantic_agent = create_agent()
     zynd_agent.set_pydantic_ai_agent(pydantic_agent)
 

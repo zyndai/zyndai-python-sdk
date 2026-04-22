@@ -111,9 +111,18 @@ class ZyndBase(
     _entity_label: str = "ZYND ENTITY"
     _entity_type: str = "agent"
 
-    def __init__(self, config: ZyndBaseConfig):
+    def __init__(self, config: ZyndBaseConfig, payload_model=None, output_model=None, max_file_size_bytes=None):
         self._config = config
         self._static_card = None
+
+        # The payload model defines what incoming request bodies look like. If
+        # the developer doesn't supply one we fall back to the default
+        # AgentPayload (free-form content + optional attachments) so behavior
+        # matches legacy agents.
+        from zyndai_agent.payload import AgentPayload
+        self.payload_model = payload_model or AgentPayload
+        self.output_model = output_model
+        self.max_file_size_bytes = max_file_size_bytes
 
         # Resolve keypair
         self.keypair = self._resolve_keypair(config)
@@ -147,7 +156,14 @@ class ZyndBase(
             if not self.keypair:
                 return {}
             base_url = self._get_base_url()
-            card = build_runtime_card(self._static_card, base_url, self.keypair)
+            card = build_runtime_card(
+                self._static_card,
+                base_url,
+                self.keypair,
+                payload_model=self.payload_model,
+                output_model=self.output_model,
+                max_file_size_bytes=self.max_file_size_bytes,
+            )
             if self._entity_type == "service":
                 card["entity_type"] = "service"
             return card
@@ -198,6 +214,7 @@ class ZyndBase(
             pay_to_address=self.pay_to_address,
             use_ngrok=config.use_ngrok,
             ngrok_auth_token=config.ngrok_auth_token or os.environ.get("NGROK_AUTH_TOKEN"),
+            max_file_size_bytes=self.max_file_size_bytes,
         )
 
         # Write card to disk

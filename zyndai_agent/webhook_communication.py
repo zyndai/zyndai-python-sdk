@@ -3,6 +3,7 @@ import logging
 import threading
 import requests
 from flask import Flask, request, jsonify
+from pydantic import BaseModel, ValidationError
 from typing import List, Callable, Optional, Dict, Any
 from zyndai_agent.message import AgentMessage
 from zyndai_agent.search import AgentSearchResponse
@@ -44,6 +45,7 @@ class WebhookCommunicationManager:
         pay_to_address: Optional[str] = None,
         use_ngrok: bool = False,
         ngrok_auth_token: Optional[str] = None,
+        max_file_size_bytes: Optional[int] = None,
     ):
         """
         Initialize the webhook agent communication manager.
@@ -85,9 +87,17 @@ class WebhookCommunicationManager:
         # Thread safety
         self._lock = threading.Lock()
 
+        # Cap on /webhook body size. Bounds how big an inline base64
+        # attachment can come through. Set via Flask's MAX_CONTENT_LENGTH so
+        # oversized bodies are rejected before the handler reads them.
+        self.max_file_size_bytes = max_file_size_bytes
+
         # Create Flask app
         self.flask_app = Flask(f"entity_{entity_id}")
         self.flask_app.logger.setLevel(logging.ERROR)  # Suppress Flask logging
+
+        if max_file_size_bytes is not None:
+            self.flask_app.config["MAX_CONTENT_LENGTH"] = max_file_size_bytes
 
         if price is not None and pay_to_address is not None:
             try:
@@ -163,17 +173,38 @@ class WebhookCommunicationManager:
             return jsonify({"error": "Entity Card not configured"}), 404
 
     def _handle_webhook_request(self, sync=False):
-        """Handle incoming webhook POST requests."""
+        """Handle incoming webhook POST requests.
+
+        Accepts two wire formats:
+        - `application/json`: inline base64 attachments (best for small files).
+        - `multipart/form-data`: binary file parts + an optional JSON `payload`
+          part (best for large files — no 33% base64 overhead).
+
+        Both paths converge on a single dict that Pydantic validates against
+        the agent's payload_model, so the handler sees the same shape.
+        """
         try:
-            # Verify request is JSON
-            if not request.is_json:
-                logger.error("Received non-JSON request")
-                return jsonify({"error": "Content-Type must be application/json"}), 400
+            content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
 
-            payload = request.get_json()
+            if content_type == "application/json":
+                payload = request.get_json(silent=True) or {}
+            elif content_type == "multipart/form-data":
+                payload = self._parse_multipart_payload()
+            else:
+                logger.error(
+                    f"Received request with unsupported Content-Type: {content_type!r}"
+                )
+                return jsonify({
+                    "error": "Content-Type must be application/json or multipart/form-data",
+                }), 400
 
-            # Parse message from dict (request.get_json() returns a dict, not a string)
-            message = AgentMessage.from_dict(payload)
+            # Parse message from dict (request.get_json() returns a dict, not a string).
+            # Use the developer-supplied payload model if set, else the default AgentPayload.
+            payload_model = getattr(self, "payload_model", None)
+            if payload_model is not None:
+                message = AgentMessage.from_dict(payload, payload_model=payload_model)
+            else:
+                message = AgentMessage.from_dict(payload)
 
             logger.info(f"[{self.entity_id}] Received message from {message.sender_id}")
 
@@ -254,9 +285,101 @@ class WebhookCommunicationManager:
                     }
                 ), 200
 
+        except ValidationError as e:
+            # Caller sent a payload that doesn't match the agent's declared
+            # RequestPayload — missing required field, wrong type, enum
+            # violation, etc. Surface Pydantic's structured error list so
+            # the client can show a useful message without parsing prose.
+            logger.info(f"[{self.entity_id}] rejected invalid payload: {e.error_count()} error(s)")
+            return jsonify({
+                "error": "validation_failed",
+                "details": e.errors(include_url=False, include_context=False),
+            }), 422
+        except ValueError as e:
+            # Bad multipart body (e.g. malformed JSON in the `payload` part).
+            # Distinct from semantic validation above.
+            logger.info(f"[{self.entity_id}] rejected malformed request: {e}")
+            return jsonify({"error": "bad_request", "detail": str(e)}), 400
         except Exception as e:
             logger.error(f"Error handling webhook request: {e}")
             return jsonify({"error": str(e)}), 500
+
+    def _parse_multipart_payload(self) -> dict:
+        """Build the webhook payload dict from a multipart/form-data request.
+
+        Merges two sources into a single dict for Pydantic validation:
+        1. A `payload` form part containing JSON with the typed fields
+           (optional — defaults to {} if absent).
+        2. One or more file parts. Each file's form-field name becomes a
+           key in the payload, mapped to an Attachment dict (filename,
+           mime_type, size_bytes, base64-encoded data). Repeating the same
+           form-field name appends to a list (useful for `pdfs: list[Attachment]`).
+
+        File bytes are base64-encoded here so downstream validation is
+        identical to the JSON path. Nothing is written to disk.
+        """
+        import base64 as _b64
+        import json as _json
+
+        payload_text = request.form.get("payload", "").strip()
+        if payload_text:
+            try:
+                payload = _json.loads(payload_text)
+            except _json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in `payload` part: {e}") from e
+            if not isinstance(payload, dict):
+                raise ValueError("`payload` part must decode to a JSON object")
+        else:
+            payload = {}
+
+        # Walk every file part; files under the same field name become a list.
+        for field_name, file_storages in request.files.lists():
+            field_attachments = []
+            for fs in file_storages:
+                if not fs or not fs.filename:
+                    continue
+                raw = fs.read()
+                field_attachments.append({
+                    "filename": fs.filename,
+                    "mime_type": fs.mimetype or None,
+                    "size_bytes": len(raw),
+                    "data": _b64.b64encode(raw).decode("ascii"),
+                })
+            if not field_attachments:
+                continue
+
+            existing = payload.get(field_name)
+            if isinstance(existing, list):
+                existing.extend(field_attachments)
+            elif existing is None:
+                # Always store as list to match `list[Attachment]` typing.
+                payload[field_name] = field_attachments
+            else:
+                # Caller declared a scalar/object under this key in JSON — we
+                # don't know how to merge files into that, so surface clearly.
+                raise ValueError(
+                    f"Cannot merge multipart file part {field_name!r}: "
+                    f"`payload` already defines it as a non-list value"
+                )
+
+        return payload
+
+    def resolve_attachment(self, attachment, *, timeout: float = 30.0) -> bytes:
+        """Return the raw bytes of an attachment, in memory, from either source.
+
+        - `data` (base64) -> decoded inline from the JSON body
+        - `url` (http/https) -> streamed download, capped at max_file_size_bytes
+
+        Nothing is persisted to disk by the SDK; the bytes live only as long
+        as the handler holds a reference to them.
+        """
+        if attachment.data is not None:
+            return attachment.decode_data()
+        if attachment.url is not None:
+            return attachment.fetch_url(
+                timeout=timeout, max_size_bytes=self.max_file_size_bytes
+            )
+        raise ValueError("Attachment has no data or url to resolve")
 
     def start_webhook_server(self):
         """Start Flask webhook server in background thread."""
@@ -511,16 +634,63 @@ class WebhookCommunicationManager:
         """Alias for add_message_handler for backward compatibility."""
         self.add_message_handler(handler_fn)
 
-    def set_response(self, message_id: str, response: str):
-        """
-        Set a response for a specific message ID (for synchronous responses).
+    def set_response(self, message_id: str, response):
+        """Set the sync response for a webhook request.
 
-        Args:
-            message_id: The ID of the message being responded to
-            response: The response content
+        `response` may be:
+          - a str: sent as-is (legacy behavior, no validation)
+          - a dict: serialized to JSON; validated against `output_model`
+            if the agent declared one
+          - a Pydantic BaseModel: serialized via model_dump_json; coerced
+            through `output_model` if declared and the instance is a
+            different class
+
+        Validation failures are converted to an error response (so the
+        caller gets a clean 500 with details) rather than raised — the
+        webhook handler is still waiting on this slot.
         """
+        import json as _json
+        output_model = getattr(self, "output_model", None)
+
+        if isinstance(response, str):
+            final = response
+        elif isinstance(response, BaseModel):
+            if output_model is not None and not isinstance(response, output_model):
+                try:
+                    response = output_model.model_validate(response.model_dump())
+                except ValidationError as e:
+                    logger.error(
+                        f"[{self.entity_id}] handler output failed {output_model.__name__} validation"
+                    )
+                    final = _json.dumps({
+                        "error": "handler_output_invalid",
+                        "details": e.errors(include_url=False, include_context=False),
+                    })
+                    with self._lock:
+                        self.pending_responses[message_id] = final
+                    return
+            final = response.model_dump_json()
+        elif isinstance(response, dict):
+            if output_model is not None:
+                try:
+                    validated = output_model.model_validate(response)
+                    final = validated.model_dump_json()
+                except ValidationError as e:
+                    logger.error(
+                        f"[{self.entity_id}] handler output failed {output_model.__name__} validation"
+                    )
+                    final = _json.dumps({
+                        "error": "handler_output_invalid",
+                        "details": e.errors(include_url=False, include_context=False),
+                    })
+            else:
+                final = _json.dumps(response)
+        else:
+            # Anything else — stringify (rare; keeps the door open).
+            final = str(response)
+
         with self._lock:
-            self.pending_responses[message_id] = response
+            self.pending_responses[message_id] = final
         logger.info(f"[{self.entity_id}] Set response for message {message_id}")
 
     def get_connection_status(self) -> Dict[str, Any]:

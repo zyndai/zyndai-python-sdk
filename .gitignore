@@ -23,3 +23,6 @@ repowise.db
 examples/http/job-scrapper/
 examples/http/dillu-persona/
 examples/http/linkedin-job-scraper/
+
+#personal test stuff
+top500agents/

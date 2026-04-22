@@ -39,10 +39,21 @@ class ZyndService(ZyndBase):
     _entity_label = "ZYND SERVICE"
     _entity_type = "service"
 
-    def __init__(self, service_config: ServiceConfig):
+    def __init__(
+        self,
+        service_config: ServiceConfig,
+        payload_model=None,
+        output_model=None,
+        max_file_size_bytes=None,
+    ):
         self.service_config = service_config
         self._handler_fn: Optional[Callable] = None
-        super().__init__(service_config)
+        super().__init__(
+            service_config,
+            payload_model=payload_model,
+            output_model=output_model,
+            max_file_size_bytes=max_file_size_bytes,
+        )
 
     def set_handler(self, fn: Callable[[str], str]):
         """

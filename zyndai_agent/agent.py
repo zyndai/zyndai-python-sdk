@@ -71,7 +71,13 @@ class ZyndAIAgent(ZyndBase):
     _entity_label = "ZYND AI AGENT"
     _entity_type = "agent"
 
-    def __init__(self, agent_config: AgentConfig):
+    def __init__(
+        self,
+        agent_config: AgentConfig,
+        payload_model=None,
+        output_model=None,
+        max_file_size_bytes=None,
+    ):
         self.agent_executor: Any = None
         self.agent_framework: AgentFramework = None
         self.custom_invoke_fn: Callable = None
@@ -85,7 +91,12 @@ class ZyndAIAgent(ZyndBase):
 
         # Webhook path: use ZyndBase for all shared infra
         self.communication_mode = "webhook"
-        super().__init__(agent_config)
+        super().__init__(
+            agent_config,
+            payload_model=payload_model,
+            output_model=output_model,
+            max_file_size_bytes=max_file_size_bytes,
+        )
 
     def _init_mqtt(self, agent_config: AgentConfig):
         """Legacy MQTT initialization — bypasses ZyndBase."""
