@@ -158,6 +158,26 @@ class WebhookCommunicationManager:
         def webhook_sync_handler():
             return self._handle_webhook_request(sync=True)
 
+        @self.flask_app.route("/webhook/response/<message_id>", methods=["GET"])
+        def webhook_response_handler(message_id: str):
+            # Async callback for /webhook: the handler stores its result via
+            # set_response(message_id, ...); the caller polls here to fetch it.
+            # First hit returns the value and removes it; repeat calls 404.
+            with self._lock:
+                if message_id in self.pending_responses:
+                    response = self.pending_responses.pop(message_id)
+                    return jsonify({
+                        "status": "success",
+                        "message_id": message_id,
+                        "response": response,
+                        "timestamp": time.time(),
+                    }), 200
+            return jsonify({
+                "status": "pending_or_unknown",
+                "message_id": message_id,
+                "error": "No response stored for this message_id (not ready, already fetched, or unknown)",
+            }), 404
+
         @self.flask_app.route("/health", methods=["GET"])
         def health_check():
             return jsonify(
@@ -387,60 +407,55 @@ class WebhookCommunicationManager:
             logger.warning("Webhook server already running")
             return
 
-        # Try to bind to configured port, retry with different ports if needed
-        max_retries = 10
-        server_started = False
+        port = self.webhook_port
 
-        for attempt in range(max_retries):
-            try:
-                port = self.webhook_port + attempt
+        # Probe the port before launching Flask. flask_app.run() raises inside
+        # the daemon thread, where the main thread never sees it — so a busy
+        # port used to be silently ignored. Fail fast here with a clear error.
+        import socket
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind((self.webhook_host, port))
+        except OSError as e:
+            probe.close()
+            raise RuntimeError(
+                f"Cannot start webhook server: port {port} on {self.webhook_host} "
+                f"is already in use ({e}). Stop the process using it or configure "
+                f"a different webhook_port."
+            ) from e
+        finally:
+            probe.close()
 
-                def run_flask():
-                    self.flask_app.run(
-                        host=self.webhook_host,
-                        port=port,
-                        debug=False,
-                        use_reloader=False,
-                        threaded=True,
-                    )
+        def run_flask():
+            self.flask_app.run(
+                host=self.webhook_host,
+                port=port,
+                debug=False,
+                use_reloader=False,
+                threaded=True,
+            )
 
-                self.flask_thread = threading.Thread(
-                    target=run_flask, daemon=True, name=f"WebhookServer-{self.entity_id}"
-                )
-                self.flask_thread.start()
+        self.flask_thread = threading.Thread(
+            target=run_flask, daemon=True, name=f"WebhookServer-{self.entity_id}"
+        )
+        self.flask_thread.start()
 
-                # Update actual port used
-                self.webhook_port = port
+        if self.webhook_url is None:
+            host = (
+                "localhost"
+                if self.webhook_host == "0.0.0.0"
+                else self.webhook_host
+            )
+            scheme = "https" if port == 443 else "http"
+            self.webhook_url = f"{scheme}://{host}:{port}/webhook"
 
-                # Auto-form webhook URL from host and port
-                if self.webhook_url is None:
-                    host = (
-                        "localhost"
-                        if self.webhook_host == "0.0.0.0"
-                        else self.webhook_host
-                    )
-                    scheme = "https" if port == 443 else "http"
-                    self.webhook_url = f"{scheme}://{host}:{port}/webhook"
+        self.is_running = True
 
-                self.is_running = True
-                server_started = True
+        # Give Flask a moment to actually accept connections.
+        time.sleep(1.5)
 
-                # Wait for server to start
-                time.sleep(1.5)
-
-                logger.info(f"Webhook server started on {self.webhook_host}:{port}")
-                break
-
-            except OSError as e:
-                if "Address already in use" in str(e) and attempt < max_retries - 1:
-                    logger.warning(f"Port {port} already in use, trying next port...")
-                    continue
-                else:
-                    logger.error(f"Failed to start webhook server: {e}")
-                    raise
-
-        if not server_started:
-            raise RuntimeError("Failed to start webhook server after multiple attempts")
+        logger.info(f"Webhook server started on {self.webhook_host}:{port}")
 
     def stop_webhook_server(self):
         """Stop the webhook server and cleanup resources."""
