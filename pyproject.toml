@@ -1,6 +1,6 @@
 [project]
 name = "zyndai-agent"
-version = "0.3.6"
+version = "0.4.0"
 description = "A multi-framework AI agent SDK for the Zynd AI Network. Supports LangChain, LangGraph, CrewAI, PydanticAI, and custom agents with a unified invoke() interface. Provides Ed25519 Identity, Agent Discovery via agent-dns, HTTP Webhook Communication, Agent Cards, and x402 Micropayments."
 authors = [
     { name = "Swapnil Shinde", email = "swapnilshinde9382@gmail.com" }
@@ -34,12 +34,9 @@ dev = [
     "pytest>=9.0.0",
 ]
 
-[project.scripts]
-zynd = "zynd_cli.main:main"
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["zyndai_agent", "zynd_cli"]
+packages = ["zyndai_agent"]

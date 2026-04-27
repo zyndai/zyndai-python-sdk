@@ -116,59 +116,6 @@ def register_entity(
     return data.get("entity_id") or keypair.entity_id
 
 
-def check_handle_available(registry_url: str, handle: str) -> dict:
-    """
-    Check if a developer handle/username is available on the registry.
-    GET /v1/handles/{handle}/available
-
-    Returns:
-        dict with keys: handle, available (bool), reason (optional)
-    """
-    try:
-        resp = requests.get(f"{registry_url}/v1/handles/{handle}/available")
-        if resp.status_code == 200:
-            return resp.json()
-        return {
-            "handle": handle,
-            "available": False,
-            "reason": f"HTTP {resp.status_code}",
-        }
-    except requests.RequestException as e:
-        return {"handle": handle, "available": False, "reason": str(e)}
-
-
-def check_entity_name_available(
-    registry_url: str, developer_handle: str, entity_name: str
-) -> dict:
-    """
-    Check if an entity name is available under a developer handle.
-    GET /v1/names/{developer}/{entity}/available
-
-    Returns:
-        dict with keys: developer, entity_name, available (bool), reason (optional),
-                        existing_entity_id (optional)
-    """
-    try:
-        resp = requests.get(
-            f"{registry_url}/v1/names/{developer_handle}/{entity_name}/available"
-        )
-        if resp.status_code == 200:
-            return resp.json()
-        return {
-            "developer": developer_handle,
-            "entity_name": entity_name,
-            "available": False,
-            "reason": f"HTTP {resp.status_code}",
-        }
-    except requests.RequestException as e:
-        return {
-            "developer": developer_handle,
-            "entity_name": entity_name,
-            "available": False,
-            "reason": str(e),
-        }
-
-
 def get_entity(
     registry_url: str, entity_id: str, entity_type: Optional[str] = None
 ) -> Optional[dict]:
@@ -393,59 +340,6 @@ def get_entity_card(
         return None
 
 
-def get_categories(registry_url: str) -> List[str]:
-    """
-    Get all available agent categories.
-    GET /v1/categories
-    """
-    try:
-        resp = requests.get(f"{registry_url}/v1/categories")
-        if resp.status_code == 200:
-            data = resp.json()
-            return data.get("categories", [])
-        logger.error(f"Failed to get categories: {resp.status_code}")
-        return []
-    except requests.RequestException as e:
-        logger.error(f"Request failed: {e}")
-        return []
-
-
-def get_tags(registry_url: str) -> List[str]:
-    """
-    Get popular agent tags.
-    GET /v1/tags
-    """
-    try:
-        resp = requests.get(f"{registry_url}/v1/tags")
-        if resp.status_code == 200:
-            data = resp.json()
-            return data.get("tags", [])
-        logger.error(f"Failed to get tags: {resp.status_code}")
-        return []
-    except requests.RequestException as e:
-        logger.error(f"Request failed: {e}")
-        return []
-
-
-def get_registry_info(registry_url: str) -> Optional[dict]:
-    """
-    Get registry discovery info.
-    GET /v1/info
-
-    Returns:
-        dict with keys: registry_id, name, developer_onboarding (mode, auth_url)
-    """
-    try:
-        resp = requests.get(f"{registry_url}/v1/info", timeout=10)
-        if resp.status_code == 200:
-            return resp.json()
-        logger.error(f"Failed to get registry info: {resp.status_code}")
-        return None
-    except requests.RequestException as e:
-        logger.error(f"Request failed: {e}")
-        return None
-
-
 def get_entity_fqan(registry_url: str, entity_id: str) -> Optional[str]:
     """
     Look up the FQAN (Fully Qualified Agent Name) for an agent.
@@ -475,17 +369,3 @@ def get_entity_fqan(registry_url: str, entity_id: str) -> Optional[str]:
         return None
 
 
-def get_network_status(registry_url: str) -> Optional[dict]:
-    """
-    Get registry node status.
-    GET /v1/network/status
-    """
-    try:
-        resp = requests.get(f"{registry_url}/v1/network/status", timeout=10)
-        if resp.status_code == 200:
-            return resp.json()
-        logger.error(f"Failed to get network status: {resp.status_code}")
-        return None
-    except requests.RequestException as e:
-        logger.error(f"Request failed: {e}")
-        return None
