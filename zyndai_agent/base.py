@@ -220,6 +220,10 @@ class ZyndBase(
         # Write card to disk
         self._write_card_file()
 
+        # Auto-register / update entity on the registry before starting the
+        # heartbeat so the WS endpoint exists when the first ping fires.
+        self._upsert_on_registry()
+
         # Start heartbeat
         self._heartbeat_thread = None
         self._heartbeat_stop = threading.Event()
@@ -277,6 +281,176 @@ class ZyndBase(
             logger.info(f"Card written to {card_path}")
         except Exception as e:
             logger.debug(f"Could not write card file: {e}")
+
+    @staticmethod
+    def _compute_update_diff(
+        existing: dict,
+        desired: dict,
+    ) -> dict:
+        """Return only the fields in *desired* that differ from *existing*.
+
+        Tags comparison: None / [] are both treated as "no tags" so a
+        registry that returns ``null`` for an empty tag list never triggers a
+        spurious PUT when local config has ``[]``.
+
+        Uses plain ``==`` for all comparisons (values are primitives + lists,
+        so this is fine without deep-copy or JSON round-tripping).
+        """
+        diff: dict = {}
+        for key, want in desired.items():
+            have = existing.get(key)
+            if key == "tags":
+                want_tags = want if (isinstance(want, list) and len(want) > 0) else []
+                have_tags = have if (isinstance(have, list) and len(have) > 0) else []
+                if want_tags != have_tags:
+                    diff[key] = want
+            else:
+                if want != have:
+                    diff[key] = want
+        return diff
+
+    def _upsert_on_registry(self) -> None:
+        """Auto-register or update this entity on the registry at startup.
+
+        Mirrors TS ZyndBase.upsertOnRegistry() (src/base.ts:176-317).
+
+        Steps:
+        1. Locate developer keypair (ZYND_DEVELOPER_KEYPAIR_PATH or ~/.zynd/developer.json).
+           If missing → warn and return (don't crash; containerised deploys that only
+           ship the agent key still start webhook + heartbeat).
+        2. Derive developer_id and HD proof from dev keypair.
+        3. GET registry — if exists, PUT update; if missing, POST register.
+        4. On HTTP 409 (GET/POST race) fall back to PUT update.
+        5. On any other failure → log red error but do NOT raise.
+        """
+        from zyndai_agent.ed25519_identity import (
+            load_keypair,
+            generate_developer_id,
+            create_derivation_proof,
+        )
+
+        # 1. Locate developer keypair
+        dev_key_path_str = os.environ.get("ZYND_DEVELOPER_KEYPAIR_PATH")
+        if not dev_key_path_str:
+            dev_key_path_str = str(Path.home() / ".zynd" / "developer.json")
+        dev_key_path = Path(dev_key_path_str)
+        if not dev_key_path.exists():
+            _log_warn(
+                f"[registry] developer keypair not found at {dev_key_path} — skipping auto-register. "
+                "Run 'zynd init' or set ZYND_DEVELOPER_KEYPAIR_PATH."
+            )
+            return
+
+        # 2. Load dev keypair and build proof
+        try:
+            dev_kp = load_keypair(str(dev_key_path))
+        except Exception as e:
+            _log_err(f"[registry] failed to load developer keypair: {e}")
+            return
+
+        dev_id = generate_developer_id(dev_kp.public_key_bytes)
+        entity_index: int = getattr(self._config, "entity_index", None) or 0
+        proof = create_derivation_proof(dev_kp, self.keypair.public_key, entity_index)
+
+        # 3. Build registration fields
+        entity_url = self._get_base_url()
+        entity_pricing = self._config.entity_pricing or None
+
+        # Loopback warning (mirrors TS isLoopbackUrl check)
+        _loopback_hosts = ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+        if any(h in entity_url for h in _loopback_hosts):
+            _log_warn(
+                f"[registry] entity_url {entity_url!r} is a loopback address — "
+                f"the registry and other agents will not be able to reach this "
+                f"{self._entity_type}. Set entity_url to a publicly reachable URL "
+                "(ngrok, cloudflared, or a real domain) before going live."
+            )
+
+        # Service-specific fields: service_endpoint defaults to entity_url
+        service_endpoint: Optional[str] = None
+        openapi_url: Optional[str] = None
+        if self._entity_type == "service":
+            service_endpoint = (
+                getattr(self._config, "service_endpoint", None) or entity_url
+            )
+            openapi_url = getattr(self._config, "openapi_url", None)
+
+        # 4. Check whether the entity already exists
+        try:
+            existing = dns_registry.get_entity(
+                self._config.registry_url, self.entity_id
+            )
+        except Exception as e:
+            _log_warn(f"[registry] lookup failed: {e}")
+            return
+
+        # Desired fields — the full set we'd like the registry to have
+        desired_fields: dict = {
+            "name": self._config.name,
+            "entity_url": entity_url,
+            "category": self._config.category,
+            "tags": self._config.tags or [],
+            "summary": self._config.summary or "",
+        }
+        if service_endpoint:
+            desired_fields["service_endpoint"] = service_endpoint
+        if openapi_url:
+            desired_fields["openapi_url"] = openapi_url
+
+        def _try_update(update_fields: dict) -> bool:
+            ok = dns_registry.update_entity(
+                registry_url=self._config.registry_url,
+                entity_id=self.entity_id,
+                keypair=self.keypair,
+                updates=update_fields,
+            )
+            if ok:
+                changed_keys = ", ".join(update_fields.keys())
+                _log_ok(f"[registry] updated {self.entity_id} ({changed_keys})")
+            else:
+                _log_err(f"[registry] update failed for {self.entity_id}")
+            return ok
+
+        if existing:
+            _log(f"[registry] {self._entity_type} already registered — checking for changes...", style="dim")
+            diff = self._compute_update_diff(existing, desired_fields)
+            if not diff:
+                _log("[registry] no changes — skipping update", style="dim #8B5CF6")
+                return
+            _try_update(diff)
+            return
+
+        # 5. Register new entity
+        _log(f"[registry] registering new {self._entity_type}...", style="dim")
+        try:
+            registered_id = dns_registry.register_entity(
+                registry_url=self._config.registry_url,
+                keypair=self.keypair,
+                name=self._config.name,
+                entity_url=entity_url,
+                category=self._config.category,
+                tags=self._config.tags or [],
+                summary=self._config.summary or "",
+                entity_type=self._entity_type,
+                entity_pricing=entity_pricing,
+                developer_id=dev_id,
+                developer_proof=proof,
+                service_endpoint=service_endpoint,
+                openapi_url=openapi_url,
+            )
+            _log_ok(f"[registry] registered {registered_id}")
+        except Exception as e:
+            msg = str(e)
+            # HTTP 409: GET said 404 but POST says the pubkey is already taken —
+            # same keypair owns it, fall back to PUT.
+            if "409" in msg:
+                _log_warn(
+                    "[registry] register returned 409 (entity already exists at this "
+                    "public key) — falling back to update..."
+                )
+                _try_update(desired_fields)
+                return
+            _log_err(f"[registry] register failed: {msg}")
 
     def _start_heartbeat(self, registry_url: str):
         """Start background thread sending WebSocket heartbeats to registry."""
