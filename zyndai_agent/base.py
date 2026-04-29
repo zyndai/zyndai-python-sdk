@@ -329,28 +329,14 @@ class ZyndBase(
             create_derivation_proof,
         )
 
-        # 1. Locate developer keypair
+        # 1. Locate developer keypair (presence only — load happens later if needed).
+        # Entity self-update only requires the entity keypair (dual-key auth on
+        # the registry). Dev key is required only for first-time registration.
         dev_key_path_str = os.environ.get("ZYND_DEVELOPER_KEYPAIR_PATH")
         if not dev_key_path_str:
             dev_key_path_str = str(Path.home() / ".zynd" / "developer.json")
         dev_key_path = Path(dev_key_path_str)
-        if not dev_key_path.exists():
-            _log_warn(
-                f"[registry] developer keypair not found at {dev_key_path} — skipping auto-register. "
-                "Run 'zynd init' or set ZYND_DEVELOPER_KEYPAIR_PATH."
-            )
-            return
-
-        # 2. Load dev keypair and build proof
-        try:
-            dev_kp = load_keypair(str(dev_key_path))
-        except Exception as e:
-            _log_err(f"[registry] failed to load developer keypair: {e}")
-            return
-
-        dev_id = generate_developer_id(dev_kp.public_key_bytes)
-        entity_index: int = getattr(self._config, "entity_index", None) or 0
-        proof = create_derivation_proof(dev_kp, self.keypair.public_key, entity_index)
+        has_dev_key = dev_key_path.exists()
 
         # 3. Build registration fields
         entity_url = self._get_base_url()
@@ -420,7 +406,25 @@ class ZyndBase(
             _try_update(diff)
             return
 
-        # 5. Register new entity
+        # 5. First-time registration — requires dev keypair for HD derivation proof.
+        if not has_dev_key:
+            _log_warn(
+                f"[registry] entity not registered yet and developer keypair not found at {dev_key_path} — "
+                "skipping initial registration. Run 'zynd init' or set ZYND_DEVELOPER_KEYPAIR_PATH "
+                "on the box that owns this entity."
+            )
+            return
+
+        try:
+            dev_kp = load_keypair(str(dev_key_path))
+        except Exception as e:
+            _log_err(f"[registry] failed to load developer keypair: {e}")
+            return
+
+        dev_id = generate_developer_id(dev_kp.public_key_bytes)
+        entity_index: int = getattr(self._config, "entity_index", None) or 0
+        proof = create_derivation_proof(dev_kp, self.keypair.public_key, entity_index)
+
         _log(f"[registry] registering new {self._entity_type}...", style="dim")
         try:
             registered_id = dns_registry.register_entity(
