@@ -135,6 +135,25 @@ def get_entity(
         return None
 
 
+def get_developer(registry_url: str, developer_id: str) -> Optional[dict]:
+    """Fetch a developer record by developer_id (zns:dev:<hash>).
+
+    Used by base.py to auto-populate the agent card's `provider` block
+    from the developer keypair on disk + the registry's developer record.
+    Returns None on 404 / network error.
+    """
+    try:
+        resp = requests.get(f"{registry_url}/v1/developers/{developer_id}")
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code != 404:
+            logger.warning(f"get_developer {developer_id}: HTTP {resp.status_code}")
+        return None
+    except requests.RequestException as e:
+        logger.warning(f"get_developer request failed: {e}")
+        return None
+
+
 def update_entity(
     registry_url: str,
     entity_id: str,
@@ -344,7 +363,7 @@ def get_entity_fqan(registry_url: str, entity_id: str) -> Optional[str]:
     """
     Look up the FQAN (Fully Qualified Agent Name) for an agent.
     Checks if the agent has a ZNS name binding and returns the FQAN string
-    (e.g., "dns01.zynd.ai/acme-corp/doc-translator").
+    (e.g., "zns01.zynd.ai/acme-corp/doc-translator").
 
     Returns None if the agent has no name binding.
     """

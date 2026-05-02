@@ -1,43 +1,25 @@
-import asyncio
-import base64
-import hashlib
-import json
+"""ZyndAIAgent — multi-framework agent on the Zynd network (A2A protocol).
+
+Mirrors `zyndai-ts-sdk/src/agent.ts`. Ported from the legacy
+WebhookCommunicationManager-based implementation to use the new A2A
+server in `zyndai_agent/a2a/`.
+"""
+
+from __future__ import annotations
+
 import logging
-import os
-import threading
-import time
-import requests
-from zyndai_agent.search import SearchAndDiscoveryManager
-from zyndai_agent.identity import IdentityManager
-from zyndai_agent.communication import AgentCommunicationManager
-from zyndai_agent.webhook_communication import WebhookCommunicationManager
-from zyndai_agent.payment import X402PaymentProcessor
-from zyndai_agent.config_manager import ConfigManager
-from zyndai_agent.ed25519_identity import (
-    Ed25519Keypair,
-    keypair_from_private_bytes,
-)
-from zyndai_agent.entity_card import build_entity_card, sign_entity_card
-from zyndai_agent.entity_card_loader import (
-    load_entity_card,
-    resolve_keypair,
-    build_runtime_card,
-    compute_card_hash,
-    resolve_card_from_config,
-    load_derivation_metadata,
-)
-from zyndai_agent.base import ZyndBase, ZyndBaseConfig, _console, _log, _log_ok, _log_warn, _log_err, _log_heartbeat
-from zyndai_agent import dns_registry
-from pydantic import BaseModel
-from typing import Optional, Any, Callable, Union, List
 from enum import Enum
+from typing import Any, Callable, Optional, Type
+
+from pydantic import BaseModel
+
+from zyndai_agent.a2a.server import Handler, HandlerInput, TaskHandle
+from zyndai_agent.base import ZyndBase, ZyndBaseConfig
 
 logger = logging.getLogger(__name__)
 
 
 class AgentFramework(str, Enum):
-    """Supported AI agent frameworks."""
-
     LANGCHAIN = "langchain"
     LANGGRAPH = "langgraph"
     CREWAI = "crewai"
@@ -48,24 +30,17 @@ class AgentFramework(str, Enum):
 class AgentConfig(ZyndBaseConfig):
     """Agent-specific config extending ZyndBaseConfig."""
 
-    # Agent-specific fields
-    developer_keypair_path: Optional[str] = None
-    entity_index: Optional[int] = None
-
-    # MQTT (legacy, kept for backward compatibility)
-    mqtt_broker_url: Optional[str] = None
-    default_outbox_topic: Optional[str] = None
-
 
 class ZyndAIAgent(ZyndBase):
-    """
-    AI Agent on the Zynd network.
+    """AI agent on the Zynd network.
 
-    Supports LangChain, LangGraph, CrewAI, PydanticAI, and custom frameworks.
-    Inherits identity, webhook, heartbeat, and payment from ZyndBase.
-
-    For MQTT communication (legacy), falls back to direct initialization
-    bypassing the base class webhook setup.
+    Two ways to wire up logic:
+      1. Framework setter (set_*_agent) + invoke()  — quick path. The
+         default handler converts the inbound message's text into a
+         string, runs the framework, returns the result.
+      2. on_message(handler) — full control. Handler receives the
+         parsed HandlerInput + a TaskHandle for streaming updates,
+         asking for clarification, or completing the task explicitly.
     """
 
     _entity_label = "ZYND AI AGENT"
@@ -73,186 +48,110 @@ class ZyndAIAgent(ZyndBase):
 
     def __init__(
         self,
-        agent_config: AgentConfig,
-        payload_model=None,
-        output_model=None,
-        max_file_size_bytes=None,
-    ):
+        config: AgentConfig,
+        *,
+        payload_model: Optional[Type[BaseModel]] = None,
+        output_model: Optional[Type[BaseModel]] = None,
+        max_body_bytes: Optional[int] = None,
+    ) -> None:
         self.agent_executor: Any = None
-        self.agent_framework: AgentFramework = None
-        self.custom_invoke_fn: Callable = None
-        self.agent_config = agent_config
-        self.communication_mode = None
+        self.agent_framework: Optional[AgentFramework] = None
+        self.custom_invoke_fn: Optional[Callable[[str], str]] = None
+        self.agent_config = config
+        self._user_handler: Optional[Handler] = None
 
-        # MQTT path: legacy, bypasses ZyndBase (which only does webhooks)
-        if agent_config.mqtt_broker_url is not None:
-            self._init_mqtt(agent_config)
-            return
-
-        # Webhook path: use ZyndBase for all shared infra
-        self.communication_mode = "webhook"
         super().__init__(
-            agent_config,
+            config,
             payload_model=payload_model,
             output_model=output_model,
-            max_file_size_bytes=max_file_size_bytes,
+            max_body_bytes=max_body_bytes,
         )
 
-    def _init_mqtt(self, agent_config: AgentConfig):
-        """Legacy MQTT initialization — bypasses ZyndBase."""
-        self.communication_mode = "mqtt"
-
-        env_keypair = self._try_resolve_keypair_legacy(agent_config)
-        if env_keypair:
-            self.keypair = env_keypair
-            self.entity_id = self.keypair.entity_id
-            self.x402_processor = X402PaymentProcessor(
-                ed25519_private_key_bytes=self.keypair.private_key_bytes
-            )
-            self.pay_to_address = self.x402_processor.account.address
-            IdentityManager.__init__(self, agent_config.registry_url)
-            SearchAndDiscoveryManager.__init__(self, registry_url=agent_config.registry_url)
-            config = {}
-        else:
-            config = ConfigManager.load_or_create(agent_config)
-            self.entity_id = config.get("entity_id", config.get("id"))
-            private_key_b64 = config.get("private_key")
-            if private_key_b64:
-                private_bytes = base64.b64decode(private_key_b64)
-                self.keypair = keypair_from_private_bytes(private_bytes)
-            else:
-                self.keypair = None
-
-            legacy_seed = config.get("legacy_seed")
-            if legacy_seed:
-                self.x402_processor = X402PaymentProcessor(agent_seed=legacy_seed)
-            elif self.keypair:
-                self.x402_processor = X402PaymentProcessor(
-                    ed25519_private_key_bytes=self.keypair.private_key_bytes
-                )
-            else:
-                seed = config.get("seed")
-                if seed:
-                    self.x402_processor = X402PaymentProcessor(agent_seed=seed)
-                else:
-                    raise ValueError("No key material available for x402 payment processor")
-
-            self.pay_to_address = self.x402_processor.account.address
-            IdentityManager.__init__(self, agent_config.registry_url)
-            SearchAndDiscoveryManager.__init__(self, registry_url=agent_config.registry_url)
-
-        identity_credential = config.get("did", {}) if config else {}
-        AgentCommunicationManager.__init__(
-            self,
-            self.entity_id,
-            default_inbox_topic=f"{self.entity_id}/inbox",
-            default_outbox_topic=agent_config.default_outbox_topic,
-            auto_reconnect=True,
-            message_history_limit=agent_config.message_history_limit,
-            identity_credential=identity_credential,
-            secret_seed=config.get("seed", "") if config else "",
-            mqtt_broker_url=agent_config.mqtt_broker_url,
-        )
-
-        self._heartbeat_thread = None
-        self._heartbeat_stop = threading.Event()
-        if self.keypair:
-            self._start_heartbeat(agent_config.registry_url)
-        self._display_info()
-
-    @staticmethod
-    def _try_resolve_keypair_legacy(agent_config) -> Optional[Ed25519Keypair]:
-        try:
-            return resolve_keypair(agent_config)
-        except ValueError:
-            return None
+        # Default handler dispatches to whichever framework was wired up.
+        self.install_handler(self._default_handler)
 
     # ---- Framework setters ----
 
-    def set_agent_executor(
-        self, agent_executor: Any, framework: AgentFramework = AgentFramework.LANGCHAIN
-    ):
-        self.agent_executor = agent_executor
-        self.agent_framework = framework
-
-    def set_langchain_agent(self, agent_executor):
-        """Set a LangChain AgentExecutor."""
-        self.agent_executor = agent_executor
+    def set_langchain_agent(self, executor: Any) -> None:
+        self.agent_executor = executor
         self.agent_framework = AgentFramework.LANGCHAIN
 
-    def set_langgraph_agent(self, graph):
-        """Set a LangGraph compiled graph."""
+    def set_langgraph_agent(self, graph: Any) -> None:
         self.agent_executor = graph
         self.agent_framework = AgentFramework.LANGGRAPH
 
-    def set_crewai_agent(self, crew):
-        """Set a CrewAI Crew instance."""
+    def set_crewai_agent(self, crew: Any) -> None:
         self.agent_executor = crew
         self.agent_framework = AgentFramework.CREWAI
 
-    def set_pydantic_ai_agent(self, agent):
-        """Set a PydanticAI Agent instance."""
+    def set_pydantic_ai_agent(self, agent: Any) -> None:
         self.agent_executor = agent
         self.agent_framework = AgentFramework.PYDANTIC_AI
 
-    def set_custom_agent(self, invoke_fn: Callable[[str], str]):
-        """Set a custom agent with a simple invoke function."""
-        self.custom_invoke_fn = invoke_fn
+    def set_custom_agent(self, fn: Callable[[str], str]) -> None:
+        self.custom_invoke_fn = fn
         self.agent_framework = AgentFramework.CUSTOM
 
-    # ---- Universal invoke ----
+    # ---- Custom handler override ----
 
-    def invoke(self, input_text: str, **kwargs) -> str:
-        """Invoke the agent, regardless of framework."""
+    def on_message(self, handler: Handler) -> None:
+        """Override the default framework-dispatch with full control
+        over the inbound message and the Task lifecycle.
+
+        Example:
+            def my_handler(input, task):
+                if "translate" in input.message.content:
+                    return task.complete({"translated": "..."})
+                else:
+                    return task.fail("don't know how")
+            agent.on_message(my_handler)
+        """
+        self._user_handler = handler
+        self.install_handler(handler)
+
+    # ---- Universal invoke (used by default handler) ----
+
+    def invoke(self, input_text: str, **kwargs: Any) -> str:
         if self.agent_framework == AgentFramework.LANGCHAIN:
             result = self.agent_executor.invoke({"input": input_text, **kwargs})
             return result.get("output", str(result))
 
-        elif self.agent_framework == AgentFramework.LANGGRAPH:
+        if self.agent_framework == AgentFramework.LANGGRAPH:
             result = self.agent_executor.invoke(
                 {"messages": [("user", input_text)], **kwargs}
             )
-            if "messages" in result and len(result["messages"]) > 0:
-                last_message = result["messages"][-1]
-                if hasattr(last_message, "content"):
-                    return last_message.content
-                return str(last_message)
+            messages = result.get("messages") if isinstance(result, dict) else None
+            if messages:
+                last = messages[-1]
+                return getattr(last, "content", str(last))
             return str(result)
 
-        elif self.agent_framework == AgentFramework.CREWAI:
+        if self.agent_framework == AgentFramework.CREWAI:
             result = self.agent_executor.kickoff(inputs={"query": input_text, **kwargs})
-            if hasattr(result, "raw"):
-                return result.raw
-            return str(result)
+            return getattr(result, "raw", str(result))
 
-        elif self.agent_framework == AgentFramework.PYDANTIC_AI:
+        if self.agent_framework == AgentFramework.PYDANTIC_AI:
             result = self.agent_executor.run_sync(input_text, **kwargs)
-            if hasattr(result, "data"):
-                return str(result.data)
-            return str(result)
+            return str(getattr(result, "data", result))
 
-        elif self.agent_framework == AgentFramework.CUSTOM:
-            if self.custom_invoke_fn:
-                return self.custom_invoke_fn(input_text)
-            raise ValueError("Custom agent invoke function not set")
+        if self.agent_framework == AgentFramework.CUSTOM:
+            if self.custom_invoke_fn is None:
+                raise ValueError("Custom agent invoke function not set")
+            return self.custom_invoke_fn(input_text)
 
-        else:
-            raise ValueError(f"Unknown agent framework: {self.agent_framework}")
+        raise ValueError(f"Unknown agent framework: {self.agent_framework}")
 
-    # ---- Legacy helpers (kept for backward compat) ----
+    # ---- Default handler ----
 
-    def _load_card_hash(self) -> Optional[str]:
-        config_dir = getattr(self.agent_config, "config_dir", None) or ".agent"
-        hash_path = os.path.join(os.getcwd(), config_dir, "card_hash")
-        if os.path.exists(hash_path):
-            with open(hash_path, "r") as f:
-                return f.read().strip()
-        return None
-
-    def _save_card_hash(self, card_hash: str):
-        config_dir = getattr(self.agent_config, "config_dir", None) or ".agent"
-        dir_path = os.path.join(os.getcwd(), config_dir)
-        os.makedirs(dir_path, exist_ok=True)
-        hash_path = os.path.join(dir_path, "card_hash")
-        with open(hash_path, "w") as f:
-            f.write(card_hash)
+    def _default_handler(self, input: HandlerInput, task: TaskHandle) -> Any:
+        if self._user_handler is not None:
+            return self._user_handler(input, task)
+        if self.agent_framework is None:
+            return task.fail(
+                "Agent has no framework registered. Call set_*_agent() or on_message() first."
+            )
+        try:
+            text = self.invoke(input.message.content)
+            return {"text": text}
+        except Exception as e:
+            return task.fail(str(e))
