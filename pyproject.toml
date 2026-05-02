@@ -1,7 +1,7 @@
 [project]
 name = "zyndai-agent"
-version = "0.5.0"
-description = "A multi-framework AI agent SDK for the Zynd AI Network. Supports LangChain, LangGraph, CrewAI, PydanticAI, and custom agents with a unified invoke() interface. Provides Ed25519 Identity, Agent Discovery via agent-dns, HTTP Webhook Communication, Agent Cards, and x402 Micropayments."
+version = "0.5.1"
+description = "A multi-framework AI agent SDK for the Zynd AI Network. Supports LangChain, LangGraph, CrewAI, PydanticAI, and custom agents with a unified invoke() interface. Provides Ed25519 identity, agent discovery via agent-dns, A2A protocol communication, agent cards, and x402 micropayments."
 authors = [
     { name = "Swapnil Shinde", email = "swapnilshinde9382@gmail.com" }
 ]
