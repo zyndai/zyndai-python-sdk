@@ -500,6 +500,12 @@ class A2AServer:
         context_id = message.get("contextId") or self.task_store.new_context_id()
         task = self.task_store.get_or_create(task_id, context_id)
 
+        # Pick up an inline pushNotificationConfig if the caller passed one
+        # in `params.configuration`. Saves a separate
+        # `tasks/pushNotificationConfig/set` round trip for fire-and-forget
+        # callers, and is what the A2A spec permits in MessageSendConfiguration.
+        self._maybe_set_inline_push_config(task_id, parsed.configuration)
+
         # If suspended in input-required, hand the message to the suspended handler.
         if task["status"]["state"] in INTERRUPTED_STATES:
             resumed = self.task_store.resume_if_suspended(task_id, message)
@@ -525,6 +531,29 @@ class A2AServer:
         self._wait_for_settle(task_id)
         final = self.task_store.get(task_id)
         return jsonify({"jsonrpc": "2.0", "id": rpc_id, "result": final})
+
+    def _maybe_set_inline_push_config(
+        self, task_id: str, configuration: Optional[dict[str, Any]]
+    ) -> None:
+        """Honor `params.configuration.pushNotificationConfig` when present.
+
+        A2A spec allows the caller to register a callback URL inline with
+        message/send so they don't need a separate `tasks/pushNotificationConfig/set`
+        round-trip. We accept both the camelCase (spec) and snake_case forms
+        because Python clients often serialize via field aliases.
+        """
+        if not isinstance(configuration, dict):
+            return
+        cfg = (
+            configuration.get("pushNotificationConfig")
+            or configuration.get("push_notification_config")
+        )
+        if not isinstance(cfg, dict):
+            return
+        url = cfg.get("url")
+        if not isinstance(url, str) or not url:
+            return
+        self.task_store.set_push_config(task_id, cfg)
 
     # -------------------------------------------------------------------------
     # message/stream (SSE)
@@ -557,6 +586,9 @@ class A2AServer:
         context_id = message.get("contextId") or self.task_store.new_context_id()
         self.task_store.get_or_create(task_id, context_id)
         self.task_store.append_message(task_id, message)
+
+        # Inline pushNotificationConfig — same shortcut as message/send.
+        self._maybe_set_inline_push_config(task_id, parsed.configuration)
 
         # Subscribe before kicking off dispatch so we don't miss the
         # initial `working` transition.
