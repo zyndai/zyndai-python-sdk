@@ -2,6 +2,7 @@ import os
 import json
 import time
 import logging
+from typing import Optional
 
 from zyndai_agent.ed25519_identity import (
     Ed25519Keypair,
@@ -216,6 +217,83 @@ class ConfigManager:
             agent_config=agent_config,
             config_dir=config_dir,
         )
+
+
+def load_home_registry_url() -> Optional[str]:
+    """Read the developer's chosen default registry URL from
+    ~/.zynd/config.json. Returns None when missing.
+
+    Mirrors `loadHomeRegistryUrl` in the TS SDK.
+    """
+    home = os.environ.get("ZYND_HOME") or os.path.join(os.path.expanduser("~"), ".zynd")
+    p = os.path.join(home, "config.json")
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, "r") as f:
+            data = json.load(f)
+        url = data.get("registry_url")
+        return url if isinstance(url, str) and url else None
+    except Exception:
+        return None
+
+
+def resolve_registry_url(
+    *,
+    override: Optional[str] = None,
+    from_config_file: Optional[str] = None,
+) -> str:
+    """Standard registry-URL resolution chain:
+
+      1. explicit override (caller-supplied)
+      2. ZYND_REGISTRY_URL env var       — ephemeral override (local dev)
+      3. ~/.zynd/config.json registry_url — developer's logged-in registry
+                                            (set by `zynd auth login --registry`)
+      4. project config field             — fallback for projects that bake a URL
+      5. https://zns01.zynd.ai            — last-resort default
+
+    Priority 3 wins over the project config so that once a developer logs into
+    an organization's registry, every project they touch targets that registry
+    — they don't have to remember to update each project's *.config.json.
+    Override knobs (1 and 2) still trump it for explicit per-call routing.
+
+    Mirrors `resolveRegistryUrl` in the TS SDK.
+    """
+    if override:
+        return override
+    env = os.environ.get("ZYND_REGISTRY_URL")
+    if env:
+        return env
+    home = load_home_registry_url()
+    if home:
+        return home
+    if from_config_file:
+        return from_config_file
+    return "https://zns01.zynd.ai"
+
+
+def build_entity_url(agent_config) -> str:
+    """Public alias for the original _build_entity_url helper.
+    Drops the legacy `webhook_url` fallback in the new SDK config schema
+    where the field has been replaced by `server_host`/`server_port`.
+    """
+    entity_url = getattr(agent_config, "entity_url", None)
+    if entity_url:
+        url = entity_url
+        if url.endswith("/webhook"):
+            return url[: -len("/webhook")]
+        return url.rstrip("/")
+
+    host = getattr(agent_config, "server_host", None) or getattr(
+        agent_config, "webhook_host", "0.0.0.0"
+    )
+    port = getattr(agent_config, "server_port", None) or getattr(
+        agent_config, "webhook_port", 5000
+    )
+    if host == "0.0.0.0":
+        host = "localhost"
+    scheme = "https" if port == 443 else "http"
+    return f"{scheme}://{host}:{port}"
 
 
 def _build_entity_url(agent_config) -> str:

@@ -1,84 +1,80 @@
-"""
-ZyndService — A service wrapper for the Zynd network.
+"""ZyndService — stateless service entity on the Zynd network (A2A).
 
-Unlike ZyndAIAgent which wraps LLM frameworks (LangChain, CrewAI, etc.),
-ZyndService wraps plain Python functions. Same identity, webhook, heartbeat,
-and payment infrastructure — but instead of executing an agent chain,
-it just runs the function passed to it.
+Mirrors `zyndai-ts-sdk/src/service.ts`. Two surfaces:
+  - set_handler(fn): str -> str  — simple in/out
+  - on_message(handler)          — full A2A access (parts, attachments, tasks)
 """
 
-import logging
-from typing import Optional, Callable, List
+from __future__ import annotations
+
+import asyncio
+import inspect
+from typing import Any, Awaitable, Callable, Optional, Type, Union
 
 from pydantic import BaseModel
-from zyndai_agent.base import ZyndBase, ZyndBaseConfig
-from zyndai_agent.message import AgentMessage
 
-logger = logging.getLogger(__name__)
+from zyndai_agent.a2a.server import Handler, HandlerInput, TaskHandle
+from zyndai_agent.base import ZyndBase, ZyndBaseConfig
 
 
 class ServiceConfig(ZyndBaseConfig):
-    """Configuration for a Zynd service. Extends ZyndBaseConfig with service-specific fields."""
     service_endpoint: Optional[str] = None
     openapi_url: Optional[str] = None
 
 
+SimpleHandlerFn = Callable[[str], Union[str, Awaitable[str]]]
+
+
 class ZyndService(ZyndBase):
-    """
-    A service on the Zynd network.
-
-    Wraps a plain Python function with identity, webhook, heartbeat,
-    and payment infrastructure. Instead of invoking an LLM chain,
-    it calls the handler function directly.
-
-    Usage:
-        service = ZyndService(ServiceConfig(name="My Service", ...))
-        service.set_handler(my_function)
-    """
-
     _entity_label = "ZYND SERVICE"
     _entity_type = "service"
 
     def __init__(
         self,
-        service_config: ServiceConfig,
-        payload_model=None,
-        output_model=None,
-        max_file_size_bytes=None,
-    ):
-        self.service_config = service_config
-        self._handler_fn: Optional[Callable] = None
+        config: ServiceConfig,
+        *,
+        payload_model: Optional[Type[BaseModel]] = None,
+        output_model: Optional[Type[BaseModel]] = None,
+        max_body_bytes: Optional[int] = None,
+    ) -> None:
+        self._handler_fn: Optional[SimpleHandlerFn] = None
         super().__init__(
-            service_config,
+            config,
             payload_model=payload_model,
             output_model=output_model,
-            max_file_size_bytes=max_file_size_bytes,
+            max_body_bytes=max_body_bytes,
         )
+        self.install_handler(self._default_handler)
 
-    def set_handler(self, fn: Callable[[str], str]):
-        """
-        Set the service handler function.
-
-        The function receives the request content as a string and returns
-        the response as a string. Auto-wires the webhook message handler.
-
-        Args:
-            fn: A callable that takes a string input and returns a string output.
-        """
+    def set_handler(self, fn: SimpleHandlerFn) -> None:
+        """Simple string-in / string-out handler."""
         self._handler_fn = fn
+        self.install_handler(self._default_handler)
 
-        def _message_handler(message: AgentMessage, topic):
-            try:
-                result = fn(message.content)
-                self.set_response(message.message_id, result)
-            except Exception as e:
-                logger.error(f"Service handler error: {e}")
-                self.set_response(message.message_id, f"Error: {str(e)}")
+    def on_message(self, handler: Handler) -> None:
+        """Full A2A handler — overrides the simple form."""
+        self.install_handler(handler)
 
-        self.add_message_handler(_message_handler)
-
-    def invoke(self, input_text: str, **kwargs) -> str:
-        """Invoke the service handler directly."""
-        if not self._handler_fn:
+    def invoke(self, input_text: str) -> str:
+        if self._handler_fn is None:
             raise ValueError("No handler function set. Call set_handler() first.")
-        return self._handler_fn(input_text)
+        return self._call_simple(input_text)
+
+    # -------------------------------------------------------------------------
+    # Default handler
+    # -------------------------------------------------------------------------
+
+    def _default_handler(self, input: HandlerInput, task: TaskHandle) -> Any:
+        if self._handler_fn is None:
+            return task.fail("ZyndService has no handler. Call set_handler() first.")
+        try:
+            result = self._call_simple(input.message.content)
+            return {"text": result}
+        except Exception as e:
+            return task.fail(str(e))
+
+    def _call_simple(self, text: str) -> str:
+        result = self._handler_fn(text)  # type: ignore[misc]
+        if inspect.isawaitable(result):
+            return asyncio.run(result)  # type: ignore[arg-type]
+        return result  # type: ignore[return-value]

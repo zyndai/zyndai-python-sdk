@@ -182,10 +182,16 @@ Follow a 12-factor split — **code config** goes in `*.config.json` (check it i
 
 ```bash
 ZYND_AGENT_KEYPAIR_PATH=/Users/you/.zynd/agents/my-agent/keypair.json
-ZYND_REGISTRY_URL=https://dns01.zynd.ai
+# ZYND_REGISTRY_URL=https://my-org-registry.example  # only set to override
 OPENAI_API_KEY=...
 NGROK_AUTH_TOKEN=...
 ```
+
+The SDK reads the registry URL from your logged-in default
+(`~/.zynd/config.json`, written by `zynd auth login --registry <url>`).
+Setting `ZYND_REGISTRY_URL` here would override that for this project,
+which is usually only useful for local-dev pointing at a self-hosted
+registry.
 
 **`agent.config.json`:**
 
@@ -281,7 +287,7 @@ Entities registered under a developer handle get a human-readable FQAN:
 {registry-host}/{developer-handle}/{entity-name}
 ```
 
-Example: `dns01.zynd.ai/acme-corp/weather-service`
+Example: `zns01.zynd.ai/acme-corp/weather-service`
 
 FQANs are created automatically on first startup when the developer has a claimed handle. Resolve via `GET /v1/resolve/{developer}/{entity}`; they appear in search results.
 
@@ -326,7 +332,7 @@ Look up a card by entity ID:
 ```python
 from zyndai_agent import DNSRegistryClient
 
-card = DNSRegistryClient.get_entity("https://dns01.zynd.ai", "zns:svc:a90cb5418edb2f55")
+card = DNSRegistryClient.get_entity("https://zns01.zynd.ai", "zns:svc:a90cb5418edb2f55")
 print(card)
 ```
 
