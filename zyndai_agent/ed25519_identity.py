@@ -224,7 +224,7 @@ def _build_proof_message(agent_pub_bytes: bytes, index: int) -> bytes:
 
 def create_derivation_proof(
     dev_kp: Ed25519Keypair,
-    agent_pub: Ed25519PublicKey,
+    agent_pub: "Ed25519PublicKey | bytes",
     index: int,
 ) -> dict:
     """
@@ -232,11 +232,18 @@ def create_derivation_proof(
 
     The developer signs (agent_public_key_bytes || big_endian_uint32(index)),
     matching the Go registry's buildProofMessage format.
+
+    Accepts the agent's public key as either a raw 32-byte sequence (what
+    callers like ZyndBase pass via ``self.keypair.public_key_bytes``) or as
+    a cryptography ``Ed25519PublicKey`` object (the legacy shape).
     """
-    agent_pub_bytes = agent_pub.public_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PublicFormat.Raw,
-    )
+    if isinstance(agent_pub, (bytes, bytearray)):
+        agent_pub_bytes = bytes(agent_pub)
+    else:
+        agent_pub_bytes = agent_pub.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
 
     message = _build_proof_message(agent_pub_bytes, index)
     signature = sign(dev_kp.private_key, message)
