@@ -438,6 +438,14 @@ class ZyndBase:
                 tags=self._config.tags or [],
                 summary=summary,
                 entity_type=self._entity_type,
+                # Service-only registry fields. The registry rejects
+                # entity_type=service POSTs that omit service_endpoint
+                # (HTTP 400 "service_endpoint is required for entity_type
+                # 'service'"). Mirror what we already computed for the
+                # diff-aware update path above so first-time registration
+                # carries the same shape.
+                service_endpoint=desired.get("service_endpoint"),
+                openapi_url=desired.get("openapi_url"),
                 developer_id=dev_id,
                 developer_proof=proof,
                 entity_pricing=(
