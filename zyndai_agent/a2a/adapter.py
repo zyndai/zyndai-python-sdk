@@ -126,16 +126,26 @@ def from_a2a_message(
     metadata = message.get("metadata") or {}
     auth = metadata.get("x-zynd-auth") or {}
 
+    # Compose the payload dict the handler will see. We only inject
+    # `content`/`prompt` when there's actual text — otherwise a service
+    # that declares a strict input_schema (e.g. `{ url: str }`) sees
+    # noise like `{content: "", prompt: "", in_reply_to: None}` and
+    # rejects the request. Same logic for `attachments` (skip when empty)
+    # and `in_reply_to` / `conversation_id` (skip when None).
     payload_dict: dict[str, Any] = {
         **data_merge,
-        "content": text_value,
-        "prompt": text_value,
-        "attachments": [a.__dict__ for a in attachments],
         "sender_id": auth.get("entity_id", "unknown"),
         "message_id": message.get("messageId"),
-        "conversation_id": message.get("contextId"),
-        "in_reply_to": message.get("taskId"),
     }
+    if text_value:
+        payload_dict["content"] = text_value
+        payload_dict["prompt"] = text_value
+    if attachments:
+        payload_dict["attachments"] = [a.__dict__ for a in attachments]
+    if message.get("contextId") is not None:
+        payload_dict["conversation_id"] = message.get("contextId")
+    if message.get("taskId") is not None:
+        payload_dict["in_reply_to"] = message.get("taskId")
 
     # Validate against the payload model when supplied. Errors propagate.
     if payload_model is not None:

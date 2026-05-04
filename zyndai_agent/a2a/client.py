@@ -7,7 +7,8 @@ implemented as a generator yielding StreamEvent dicts.
 
 import json
 import uuid
-from typing import Any, Generator, Optional
+from dataclasses import dataclass
+from typing import Any, Generator, Literal, Optional
 
 import requests
 
@@ -58,6 +59,7 @@ class A2AClient:
         self,
         url: str,
         *,
+        transport: "A2ATransport" = "JSONRPC",
         text: Optional[str] = None,
         data: Optional[dict[str, Any]] = None,
         attachments: Optional[list[Attachment]] = None,
@@ -66,7 +68,25 @@ class A2AClient:
         blocking: bool = True,
         timeout: Optional[float] = None,
     ) -> dict[str, Any]:
-        """Send `message/send` and return the final Task dict."""
+        """Send the message and return the final Task dict.
+
+        `transport`:
+          - "JSONRPC"   (default) — signed JSON-RPC `message/send` envelope
+          - "HTTP+JSON"           — plain POST of MessageSendParams; response
+                                    is a Task or Message body directly.
+        """
+        if transport == "HTTP+JSON":
+            return self._sync_http_json(
+                url,
+                text=text,
+                data=data,
+                attachments=attachments,
+                task_id=task_id,
+                context_id=context_id,
+                blocking=blocking,
+                timeout=timeout,
+            )
+
         message = self._build_message(
             text=text,
             data=data,
@@ -99,13 +119,57 @@ class A2AClient:
         result = body.get("result")
         if isinstance(result, dict) and result.get("kind") == "task":
             return result
-        # Server returned a bare Message — wrap in synthetic Task.
+        return self._wrap_message_as_task(result, context_id)
+
+    def _sync_http_json(
+        self,
+        url: str,
+        *,
+        text: Optional[str],
+        data: Optional[dict[str, Any]],
+        attachments: Optional[list[Attachment]],
+        task_id: Optional[str],
+        context_id: Optional[str],
+        blocking: bool,
+        timeout: Optional[float],
+    ) -> dict[str, Any]:
+        """HTTP+JSON transport — POSTs MessageSendParams directly (no JSON-RPC
+        envelope) and expects a Task or Message body back."""
+        message = self._build_message(
+            text=text,
+            data=data,
+            attachments=attachments,
+            task_id=task_id,
+            context_id=context_id,
+        )
+        params = {"message": message, "configuration": {"blocking": blocking}}
+        resp = requests.post(
+            url,
+            json=params,
+            timeout=timeout or self.timeout,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        if not resp.ok:
+            raise RuntimeError(
+                f"A2A sync HTTP+JSON {resp.status_code}: {resp.text}"
+            )
+        result = resp.json()
+        if isinstance(result, dict) and result.get("kind") == "task":
+            return result
+        return self._wrap_message_as_task(result, context_id)
+
+    @staticmethod
+    def _wrap_message_as_task(
+        msg: Any, context_id: Optional[str]
+    ) -> dict[str, Any]:
+        """Wrap a bare Message response in a synthetic completed Task so
+        callers always see a uniform shape."""
         return {
             "kind": "task",
             "id": str(uuid.uuid4()),
             "contextId": context_id or str(uuid.uuid4()),
             "status": {"state": "completed"},
-            "history": [result] if result else [],
+            "history": [msg] if msg else [],
             "artifacts": [],
         }
 
@@ -197,11 +261,19 @@ class A2AClient:
         task_id: Optional[str] = None,
         context_id: Optional[str] = None,
         timeout: Optional[float] = None,
+        prefer_transport: str = "auto",
     ) -> dict[str, Any]:
-        """Resolve an agent card URL to its A2A endpoint, then sync()."""
-        endpoint = resolve_a2a_endpoint(card_or_base_url, timeout=timeout or 10)
+        """Resolve an agent card URL → {transport, url}, then sync().
+
+        Pass `prefer_transport` to force a specific transport; default
+        ("auto") follows the card's `preferredTransport`.
+        """
+        resolved = resolve_transport(
+            card_or_base_url, prefer=prefer_transport, timeout=timeout or 10
+        )
         return self.sync(
-            endpoint,
+            resolved.url,
+            transport=resolved.transport,
             text=text,
             data=data,
             attachments=attachments,
@@ -278,12 +350,70 @@ class A2AClient:
 # -----------------------------------------------------------------------------
 
 
-def resolve_a2a_endpoint(card_url: str, *, timeout: float = 10) -> str:
-    """Fetch the agent card and return its primary A2A JSON-RPC URL.
+A2ATransport = Literal["JSONRPC", "HTTP+JSON"]
 
-    Accepts:
-      - direct card URL ending in .json (fetched verbatim)
-      - base URL (we append /.well-known/agent-card.json)
+
+@dataclass
+class ResolvedTransport:
+    transport: A2ATransport
+    url: str
+
+
+def _normalize_transport(t: str) -> Optional[A2ATransport]:
+    up = (t or "").strip().upper()
+    if up in ("JSONRPC", "JSON-RPC", ""):
+        return "JSONRPC"
+    if up in ("HTTP+JSON", "HTTPJSON", "HTTP_JSON"):
+        return "HTTP+JSON"
+    return None
+
+
+def resolve_transport_from_card(
+    card: dict[str, Any],
+    prefer: str = "auto",
+) -> ResolvedTransport:
+    """Pick {transport, url} from a card payload.
+
+    `prefer="auto"` follows the card's `preferredTransport`. Pass
+    "JSONRPC" or "HTTP+JSON" to force a specific transport (raises if
+    not advertised).
+    """
+    ifaces: list[ResolvedTransport] = []
+    primary_url = card.get("url")
+    card_preferred = _normalize_transport(card.get("preferredTransport") or "JSONRPC")
+    if primary_url and card_preferred:
+        ifaces.append(ResolvedTransport(transport=card_preferred, url=primary_url))
+    for iface in card.get("additionalInterfaces") or []:
+        t = _normalize_transport(iface.get("transport") or "")
+        url = iface.get("url")
+        if t and url:
+            ifaces.append(ResolvedTransport(transport=t, url=url))
+    if not ifaces:
+        raise RuntimeError("no supported transport advertised on agent card")
+
+    if prefer == "auto":
+        return ifaces[0]
+    norm = _normalize_transport(prefer)
+    if norm is None:
+        raise RuntimeError(f"unknown transport preference: {prefer!r}")
+    for r in ifaces:
+        if r.transport == norm:
+            return r
+    advertised = ", ".join(r.transport for r in ifaces)
+    raise RuntimeError(
+        f"transport {norm!r} not advertised; available: {advertised}"
+    )
+
+
+def resolve_transport(
+    card_url: str,
+    prefer: str = "auto",
+    *,
+    timeout: float = 10,
+) -> ResolvedTransport:
+    """Fetch the well-known agent card and resolve its transport+URL.
+
+    Pass `prefer` to force a specific transport; default follows the card.
     """
     normalized = (
         card_url
@@ -293,15 +423,11 @@ def resolve_a2a_endpoint(card_url: str, *, timeout: float = 10) -> str:
     resp = requests.get(normalized, timeout=timeout)
     if not resp.ok:
         raise RuntimeError(f"agent-card fetch HTTP {resp.status_code}: {normalized}")
-    card = resp.json()
+    return resolve_transport_from_card(resp.json(), prefer=prefer)
 
-    preferred = (card.get("preferredTransport") or "JSONRPC").upper()
-    primary = card.get("url")
-    if primary and preferred in ("JSONRPC", ""):
-        return primary
-    for iface in card.get("additionalInterfaces") or []:
-        if (iface.get("transport") or "").upper() == "JSONRPC":
-            return iface["url"]
-    if primary:
-        return primary
-    raise RuntimeError("no JSON-RPC endpoint advertised on agent card")
+
+def resolve_a2a_endpoint(card_url: str, *, timeout: float = 10) -> str:
+    """Back-compat wrapper. Returns the JSON-RPC endpoint URL only —
+    callers that need transport awareness should use `resolve_transport`.
+    """
+    return resolve_transport(card_url, prefer="JSONRPC", timeout=timeout).url

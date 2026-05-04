@@ -60,7 +60,15 @@ from zyndai_agent.a2a.adapter import (
 )
 from zyndai_agent.a2a.task_store import TaskStore
 from zyndai_agent.a2a.server import A2AServer
-from zyndai_agent.a2a.client import A2AClient, A2AError, resolve_a2a_endpoint
+from zyndai_agent.a2a.client import (
+    A2AClient,
+    A2AError,
+    A2ATransport,
+    ResolvedTransport,
+    resolve_a2a_endpoint,
+    resolve_transport,
+    resolve_transport_from_card,
+)
 from zyndai_agent.a2a.card import (
     build_agent_card,
     sign_agent_card,
@@ -121,6 +129,10 @@ __all__ = [
     "A2AClient",
     "A2AError",
     "resolve_a2a_endpoint",
+    "resolve_transport",
+    "resolve_transport_from_card",
+    "A2ATransport",
+    "ResolvedTransport",
     "build_agent_card",
     "sign_agent_card",
     "AgentCardSkill",
