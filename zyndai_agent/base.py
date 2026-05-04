@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Optional, Type
 
@@ -480,26 +481,72 @@ class ZyndBase:
     # -------------------------------------------------------------------------
 
     def _start_heartbeat(self) -> None:
-        # The pre-existing heartbeat code lives in IdentityManager / a websocket
-        # helper. Keep it stable across the A2A migration; just kick it off
-        # using whatever the existing implementation expected.
-        try:
-            self._start_heartbeat_ws()
-        except Exception as e:
-            _log_warn(f"[heartbeat] failed to start: {e}")
+        """Start the WebSocket heartbeat thread.
 
-    def _start_heartbeat_ws(self) -> None:
-        """Stub — defer to subclass / pre-existing IdentityManager
-        heartbeat. The TS SDK runs a Ed25519-signed timestamp every 30s
-        over a registry WebSocket. Python equivalent stays in the
-        existing implementation; nothing in the A2A migration changes
-        the heartbeat protocol.
+        Restores the body that existed on the pre-0.5 ``feat/multi-agent-orchestration``
+        branch. The 0.5.0 A2A merge replaced this with a stub (``_start_heartbeat_ws``)
+        that looked for a ``_legacy_start_heartbeat`` attribute that doesn't exist
+        anywhere — so on 0.5.0–0.5.2 every Python entity registered fine, then
+        immediately drifted to ``status=inactive`` and was filtered from
+        discovery. This restores the WS heartbeat (signed Ed25519 timestamp
+        every 30s) so registered entities stay active.
         """
-        # Existing zyndai-agent heartbeat lives in the parent class.
-        # If a subclass / mixin provides _start_heartbeat_thread, use it.
-        impl = getattr(self, "_legacy_start_heartbeat", None)
-        if callable(impl):
-            impl(self._config.registry_url)
+        try:
+            import websockets  # noqa: F401
+        except ImportError:
+            _log_warn(
+                "[heartbeat] websockets package missing — "
+                "install with `pip install zyndai-agent[heartbeat]`"
+            )
+            return
+
+        registry_url = self._config.registry_url
+        debug = os.environ.get("ZYND_HEARTBEAT_DEBUG", "").lower() in ("1", "true", "yes")
+
+        def _heartbeat_loop() -> None:
+            from zyndai_agent.ed25519_identity import sign as ed25519_sign
+
+            ws_url = registry_url.replace("https://", "wss://").replace("http://", "ws://")
+            ws_url = f"{ws_url}/v1/entities/{self.entity_id}/ws"
+
+            while not self._heartbeat_stop.is_set():
+                try:
+                    import websockets.sync.client as ws_client
+
+                    if debug:
+                        _log_heartbeat(f"connecting {ws_url}")
+                    with ws_client.connect(ws_url) as ws:
+                        _log_heartbeat(f"connected (interval 30s)")
+                        while not self._heartbeat_stop.is_set():
+                            ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                            signature = ed25519_sign(
+                                self.keypair.private_key, ts.encode()
+                            )
+                            ws.send(
+                                json.dumps({"timestamp": ts, "signature": signature})
+                            )
+                            if debug:
+                                _log_heartbeat(f"sent {ts}")
+                            for _ in range(30):
+                                if self._heartbeat_stop.is_set():
+                                    return
+                                time.sleep(1)
+                except Exception as exc:  # noqa: BLE001 — log + reconnect
+                    _log_warn(
+                        f"[heartbeat] {type(exc).__name__}: {exc} — "
+                        f"reconnect in 5s"
+                    )
+                    for _ in range(5):
+                        if self._heartbeat_stop.is_set():
+                            return
+                        time.sleep(1)
+
+        self._heartbeat_thread = threading.Thread(
+            target=_heartbeat_loop,
+            daemon=True,
+            name=f"Heartbeat-{self.entity_id}",
+        )
+        self._heartbeat_thread.start()
 
     # -------------------------------------------------------------------------
     # Display
