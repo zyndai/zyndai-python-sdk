@@ -84,6 +84,20 @@ except ImportError:  # pragma: no cover
 
 
 # -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+
+def _slugify_name(name: str, short_suffix: str = "") -> str:
+    """Mirror TS slugifyName: lowercase, spaces/underscores → hyphens, strip non-alnum-hyphen."""
+    import re
+    slug = re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-").replace("_", "-"))
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    if len(slug) < 3:
+        slug = slug + short_suffix
+    return slug[:36]
+
+
+# -----------------------------------------------------------------------------
 # Config schema — mirrors TS ZyndBaseConfigSchema
 # -----------------------------------------------------------------------------
 
@@ -439,6 +453,8 @@ class ZyndBase:
         entity_index = self._config.entity_index or 0
         proof = create_derivation_proof(dev_kp, self.keypair.public_key_bytes, entity_index)
 
+        entity_name = _slugify_name(self._config.name or "", f"-{self._entity_type}")
+
         _log(f"[registry] registering new {self._entity_type}...")
         try:
             registered_id = dns_registry.register_entity(
@@ -450,6 +466,7 @@ class ZyndBase:
                 tags=self._config.tags or [],
                 summary=summary,
                 entity_type=self._entity_type,
+                entity_name=entity_name,
                 # Service-only registry fields. The registry rejects
                 # entity_type=service POSTs that omit service_endpoint
                 # (HTTP 400 "service_endpoint is required for entity_type

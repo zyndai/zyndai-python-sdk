@@ -359,6 +359,59 @@ def get_entity_card(
         return None
 
 
+def register_name(
+    registry_url: str,
+    developer_keypair: Ed25519Keypair,
+    developer_handle: str,
+    entity_id: str,
+    entity_name: str,
+    version: str = "",
+    capability_tags: Optional[List[str]] = None,
+) -> str:
+    """
+    POST /v1/names — bind an entity to a FQAN under a developer handle.
+    Developer signs the binding payload (mirrors TS registerName).
+
+    Returns the FQAN string (e.g. "registry.zynd.ai/swapnil/my-agent").
+    """
+    from zyndai_agent.a2a.canonical import canonical_bytes
+
+    signable = {
+        "capability_tags": capability_tags or None,
+        "developer_handle": developer_handle,
+        "entity_id": entity_id,
+        "entity_name": entity_name,
+        "version": version,
+    }
+    sig_bytes = canonical_bytes(signable)
+    signature = sign(developer_keypair.private_key, sig_bytes)
+
+    body: dict = {
+        "developer_handle": developer_handle,
+        "entity_id": entity_id,
+        "entity_name": entity_name,
+        "signature": signature,
+        "version": version,
+    }
+    if capability_tags:
+        body["capability_tags"] = capability_tags
+
+    resp = requests.post(
+        f"{registry_url}/v1/names",
+        json=body,
+        headers={"Content-Type": "application/json"},
+    )
+    if not resp.ok:
+        raise RuntimeError(f"register_name: HTTP {resp.status_code}: {resp.text}")
+
+    data = resp.json()
+    try:
+        host = registry_url.rstrip("/").split("//", 1)[-1].split("/")[0]
+        return data.get("fqan") or f"{host}/{developer_handle}/{entity_name}"
+    except Exception:
+        return data.get("fqan") or f"{developer_handle}/{entity_name}"
+
+
 def get_entity_fqan(registry_url: str, entity_id: str) -> Optional[str]:
     """
     Look up the FQAN (Fully Qualified Agent Name) for an agent.
