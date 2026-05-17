@@ -2212,7 +2212,7 @@ wheels = [
 
 [[package]]
 name = "zyndai-agent"
-version = "0.5.3"
+version = "0.6.1"
 source = { editable = "." }
 dependencies = [
     { name = "base58" },
