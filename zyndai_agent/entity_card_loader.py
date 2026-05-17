@@ -184,6 +184,7 @@ def build_runtime_card(
     payload_model: Optional[Type[BaseModel]] = None,
     output_model: Optional[Type[BaseModel]] = None,
     fallback_provider: Optional[dict[str, Any]] = None,
+    logos: Any = None,
 ) -> dict[str, Any]:
     """Build the A2A-shaped agent card directly from a ZyndBaseConfig
     + runtime identity. Fully signed and ready to ship over the wire.
@@ -285,7 +286,8 @@ def build_runtime_card(
         protocol_version=getattr(config, "protocol_version", "0.3.0") or "0.3.0",
         a2a_path=getattr(config, "a2a_path", "/a2a/v1") or "/a2a/v1",
         provider=provider_obj,
-        icon_url=getattr(config, "icon_url", None),
+        icon_url=getattr(config, "icon_url", None) or (logos.default if logos else None),
+        logos=logos,
         documentation_url=getattr(config, "documentation_url", None),
         capabilities=capabilities,
         default_input_modes=getattr(config, "default_input_modes", None),

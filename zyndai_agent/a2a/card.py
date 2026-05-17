@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from zyndai_agent.a2a.canonical import canonical_bytes
 from zyndai_agent.ed25519_identity import Ed25519Keypair, sign as ed_sign
+from zyndai_agent.logo import AgentLogos
 
 
 _DEFAULT_PROTOCOL_VERSION = "0.3.0"
@@ -84,6 +85,7 @@ class BuildCardOptions:
     category: Optional[str] = None
     tags: Optional[list[str]] = None
     summary: Optional[str] = None
+    logos: Optional[AgentLogos] = None
 
 
 def build_agent_card(opts: BuildCardOptions) -> dict[str, Any]:
@@ -183,6 +185,7 @@ def build_agent_card(opts: BuildCardOptions) -> dict[str, Any]:
         "defaultInputModes": default_input_modes,
         "defaultOutputModes": default_output_modes,
         "skills": skills,
+        "logos": _logos_to_dict(opts.logos),
         "securitySchemes": security_schemes,
         "security": security,
         "x-zynd": x_zynd,
@@ -255,6 +258,18 @@ def _security_schemes_to_dict(
     return {
         k: {kk: vv for kk, vv in s.__dict__.items() if vv is not None}
         for k, s in schemes.items()
+    }
+
+
+def _logos_to_dict(logos: Optional[AgentLogos]) -> Optional[dict[str, Any]]:
+    if logos is None:
+        return None
+    return {
+        "default": logos.default,
+        "variants": [
+            {"url": v.url, "width": v.width, "height": v.height}
+            for v in logos.variants
+        ],
     }
 
 

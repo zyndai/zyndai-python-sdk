@@ -8,6 +8,7 @@ Mirrors `zyndai-ts-sdk/src/index.ts` post-A2A migration:
 """
 
 from zyndai_agent.base import ZyndBase, ZyndBaseConfig
+from zyndai_agent.logo import AgentLogos, LogoVariant, scan_logos
 from zyndai_agent.agent import ZyndAIAgent, AgentConfig
 from zyndai_agent.service import ZyndService, ServiceConfig
 from zyndai_agent.message import AgentMessage
@@ -49,6 +50,9 @@ __all__ = [
     "ZyndService",
     "ServiceConfig",
     # Messaging / payloads
+    "AgentLogos",
+    "LogoVariant",
+    "scan_logos",
     "AgentMessage",
     "AgentPayload",
     "Attachment",

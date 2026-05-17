@@ -279,6 +279,7 @@ class A2AServer:
         developer_proof: Optional[dict[str, Any]] = None,
         idle_ttl_seconds: int = 60 * 60,
         flask_app: Optional[Flask] = None,
+        assets_dir: Optional[str] = None,
     ) -> None:
         self.entity_id = entity_id
         self.keypair = keypair
@@ -297,10 +298,13 @@ class A2AServer:
         self.replay_cache = ReplayCache()
 
         self._handler: Optional[Handler] = None
+        self._assets_dir = assets_dir
         self._app = flask_app or Flask(f"zynd-a2a-{entity_id[:12]}")
         self._app.config["MAX_CONTENT_LENGTH"] = self.max_body_bytes
         self._app.logger.setLevel(logging.ERROR)
         self._register_routes()
+        if assets_dir:
+            self._register_logo_routes(assets_dir)
 
         self._server_thread: Optional[threading.Thread] = None
         self._is_running = False
@@ -411,6 +415,31 @@ class A2AServer:
         @bp.route(self.a2a_path, methods=["POST"])
         def a2a() -> Any:
             return self._handle_rpc()
+
+        self._app.register_blueprint(bp)
+
+    def _register_logo_routes(self, assets_dir: str) -> None:
+        import os
+        from flask import send_file, abort
+
+        bp = Blueprint(f"a2a-logos-{self.entity_id[:12]}", __name__)
+
+        @bp.route("/logo.png", methods=["GET"])
+        def logo_default() -> Any:
+            fpath = os.path.join(assets_dir, "logo.png")
+            if not os.path.isfile(fpath):
+                abort(404)
+            return send_file(os.path.abspath(fpath), mimetype="image/png")
+
+        @bp.route("/logo/<dims>.png", methods=["GET"])
+        def logo_variant(dims: str) -> Any:
+            import re
+            if not re.fullmatch(r"\d+x\d+", dims):
+                abort(404)
+            fpath = os.path.join(assets_dir, f"logo@{dims}.png")
+            if not os.path.isfile(fpath):
+                abort(404)
+            return send_file(os.path.abspath(fpath), mimetype="image/png")
 
         self._app.register_blueprint(bp)
 

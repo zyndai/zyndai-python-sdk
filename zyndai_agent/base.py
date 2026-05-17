@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from zyndai_agent import dns_registry
 from zyndai_agent.a2a.server import A2AServer, Handler, HandlerInput, TaskHandle
+from zyndai_agent.logo import AgentLogos, scan_logos
 from zyndai_agent.ed25519_identity import (
     Ed25519Keypair,
     generate_entity_id,
@@ -221,9 +222,14 @@ class ZyndBase:
         # (timestamps) stay fresh.
         self._static_card = resolve_card_from_config(config)
         self._resolved_provider: Optional[dict[str, Any]] = None
+        self._detected_logos: Optional[AgentLogos] = None
+        self._logos_scanned = False
 
         def _build_card() -> dict[str, Any]:
             base_url = self._get_base_url()
+            if not self._logos_scanned:
+                self._detected_logos = scan_logos(self._get_assets_dir(), base_url)
+                self._logos_scanned = True
             return build_runtime_card(
                 config=config,
                 base_url=base_url,
@@ -232,6 +238,7 @@ class ZyndBase:
                 payload_model=self.payload_model,
                 output_model=self.output_model,
                 fallback_provider=self._resolved_provider,
+                logos=self._detected_logos,
             )
 
         self._build_card = _build_card
@@ -249,6 +256,7 @@ class ZyndBase:
             payload_model=self.payload_model,
             output_model=self.output_model,
             fqan=config.fqan,
+            assets_dir=self._get_assets_dir(),
         )
 
         # Heartbeat state.
@@ -333,6 +341,9 @@ class ZyndBase:
         if url.endswith("/webhook"):
             url = url[: -len("/webhook")]
         return url.rstrip("/")
+
+    def _get_assets_dir(self) -> str:
+        return os.path.join(os.getcwd(), "assets")
 
     def _is_loopback_url(self, url: str) -> bool:
         try:
