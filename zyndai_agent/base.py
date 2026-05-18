@@ -258,6 +258,7 @@ class ZyndBase:
         self._build_card = _build_card
 
         # A2A server.
+        _is_dev = os.environ.get("ZYND_DEV") == "1"
         self.server = A2AServer(
             entity_id=self.entity_id,
             keypair=self.keypair,
@@ -271,6 +272,7 @@ class ZyndBase:
             output_model=self.output_model,
             fqan=config.fqan,
             assets_dir=self._get_assets_dir(),
+            dev_mode=_is_dev,
         )
 
         # Heartbeat state.

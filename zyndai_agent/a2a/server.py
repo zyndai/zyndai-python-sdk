@@ -280,6 +280,7 @@ class A2AServer:
         idle_ttl_seconds: int = 60 * 60,
         flask_app: Optional[Flask] = None,
         assets_dir: Optional[str] = None,
+        dev_mode: bool = False,
     ) -> None:
         self.entity_id = entity_id
         self.keypair = keypair
@@ -287,12 +288,14 @@ class A2AServer:
         self.host = host
         self.port = port
         self.a2a_path = a2a_path
-        self.auth_mode: AuthMode = auth_mode
+        # Dev mode forces open auth — zero verification.
+        self.auth_mode: AuthMode = "open" if dev_mode else auth_mode
         self.max_body_bytes = max_body_bytes
         self.payload_model = payload_model
         self.output_model = output_model
         self.fqan = fqan
         self.developer_proof = developer_proof
+        self._dev_mode = dev_mode
 
         self.task_store = TaskStore(idle_ttl_seconds=idle_ttl_seconds)
         self.replay_cache = ReplayCache()
@@ -303,6 +306,8 @@ class A2AServer:
         self._app.config["MAX_CONTENT_LENGTH"] = self.max_body_bytes
         self._app.logger.setLevel(logging.ERROR)
         self._register_routes()
+        if dev_mode:
+            self._register_dev_ui_route()
         if assets_dir:
             self._register_logo_routes(assets_dir)
 
@@ -434,6 +439,29 @@ class A2AServer:
         @bp.route(self.a2a_path, methods=["POST"])
         def a2a() -> Any:
             return self._handle_rpc()
+
+        self._app.register_blueprint(bp)
+
+    def _register_dev_ui_route(self) -> None:
+        from zyndai_agent.a2a.dev_ui import build_dev_ui_html
+
+        try:
+            card = self.agent_card_builder()
+            agent_name = card.get("name") or "agent"
+        except Exception:
+            agent_name = "agent"
+
+        html = build_dev_ui_html(
+            agent_name=str(agent_name),
+            a2a_path=self.a2a_path,
+            payload_model=self.payload_model,
+        )
+
+        bp = Blueprint(f"a2a-devui-{self.entity_id[:12]}", __name__)
+
+        @bp.route("/", methods=["GET"])
+        def dev_ui() -> Any:
+            return Response(html, mimetype="text/html")
 
         self._app.register_blueprint(bp)
 
