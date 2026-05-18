@@ -454,7 +454,6 @@ class A2AServer:
         html = build_dev_ui_html(
             agent_name=str(agent_name),
             a2a_path=self.a2a_path,
-            payload_model=self.payload_model,
         )
 
         bp = Blueprint(f"a2a-devui-{self.entity_id[:12]}", __name__)
