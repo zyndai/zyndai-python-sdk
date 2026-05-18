@@ -299,13 +299,36 @@ class ZyndBase:
     def start(self) -> None:
         """Start the A2A server, write the card file, register on the
         registry, start the heartbeat, print the banner.
+
+        Dev mode (ZYND_DEV=1): uses Flask's Werkzeug reloader instead of a
+        daemon thread. Registration and heartbeat only run in the outer
+        (watcher) process; Werkzeug child processes (WERKZEUG_RUN_MAIN=true)
+        skip them so reloads don't re-trigger the registry flow.
         """
-        self.server.start()
+        is_dev = os.environ.get("ZYND_DEV") == "1"
+        is_reloader_child = os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+
+        if is_dev and is_reloader_child:
+            # Werkzeug restarted us after a code change — just serve.
+            _log("[dev] reloading — skipping registration")
+            self.server.start_dev()  # blocking
+            return
+
+        # Prod path (non-blocking) or dev outer process (blocking at the end).
+        if not is_dev:
+            self.server.start()
+
         self._resolve_provider()
         self._write_card_file()
         self._upsert_on_registry()
         self._start_heartbeat()
         self._display_info()
+
+        if is_dev:
+            # Outer process becomes the Werkzeug file watcher; registration +
+            # heartbeat keep running here while the child serves requests.
+            _log("[dev] watching .py files — reload on save (config changes need restart)")
+            self.server.start_dev()  # blocking
 
     def stop(self) -> None:
         self._heartbeat_stop.set()

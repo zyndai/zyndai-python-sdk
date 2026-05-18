@@ -377,6 +377,25 @@ class A2AServer:
         self._bound_port = self.port
         time.sleep(0.5)  # give Flask a moment to start accepting
 
+    def start_dev(self) -> None:
+        """Dev mode: run Flask with Werkzeug reloader (blocking, must be called from main thread).
+
+        The Werkzeug reloader spawns a child process (WERKZEUG_RUN_MAIN=true) that
+        serves requests and watches .py files. The calling process becomes the file
+        watcher; base.py skips registration/heartbeat in the child so they only run
+        once on initial boot.
+        """
+        self.task_store.start_sweeper()
+        self._is_running = True
+        self._bound_port = self.port
+        self._app.run(
+            host=self.host,
+            port=self.port,
+            debug=True,
+            use_reloader=True,
+            threaded=True,
+        )
+
     def stop(self) -> None:
         self.task_store.shutdown()
         self._is_running = False
