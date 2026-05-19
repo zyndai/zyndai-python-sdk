@@ -258,6 +258,7 @@ class ZyndBase:
         self._build_card = _build_card
 
         # A2A server.
+        dev_mode = os.environ.get("ZYND_DEV") == "1"
         self.server = A2AServer(
             entity_id=self.entity_id,
             keypair=self.keypair,
@@ -271,6 +272,7 @@ class ZyndBase:
             output_model=self.output_model,
             fqan=config.fqan,
             assets_dir=self._get_assets_dir(),
+            dev_mode=dev_mode,
         )
 
         # Heartbeat state.
@@ -604,6 +606,8 @@ class ZyndBase:
         print(f"  Address      {self.pay_to_address}")
         print(f"  A2A          {self.a2a_url}")
         print(f"  Card         {self.card_url}")
+        if os.environ.get("ZYND_DEV") == "1":
+            print(f"  Dev UI       {self._get_base_url()}")
         print(f"  Price        {price}")
         print()
 

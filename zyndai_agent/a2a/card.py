@@ -287,11 +287,17 @@ def _zod_like_advertisement(
     """Build the input_schema/output_schema/accepts_files block from
     Pydantic models. Equivalent to `zodSchemaAdvertisement` on TS side
     but uses Pydantic's model_json_schema().
+
+    Strips fields listed in the model's INTERNAL_FIELDS class attribute
+    (transport-level routing fields like sender_id) so the published
+    schema only advertises what callers actually fill in.
     """
     ad: dict[str, Any] = {}
     if payload_model is not None:
         try:
-            ad["input_schema"] = payload_model.model_json_schema()
+            schema = payload_model.model_json_schema()
+            _strip_internal_fields(schema, payload_model)
+            ad["input_schema"] = schema
         except Exception:
             pass
     if output_model is not None:
@@ -302,6 +308,20 @@ def _zod_like_advertisement(
     if payload_model is not None and _detects_attachments(payload_model):
         ad["accepts_files"] = True
     return ad
+
+
+def _strip_internal_fields(schema: dict[str, Any], model: Type[BaseModel]) -> None:
+    internal = getattr(model, "INTERNAL_FIELDS", None)
+    if not internal:
+        return
+    props = schema.get("properties") or {}
+    schema["properties"] = {k: v for k, v in props.items() if k not in internal}
+    req = schema.get("required") or []
+    filtered = [k for k in req if k not in internal]
+    if filtered:
+        schema["required"] = filtered
+    elif "required" in schema:
+        del schema["required"]
 
 
 def _detects_attachments(model: Type[BaseModel]) -> bool:
