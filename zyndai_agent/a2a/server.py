@@ -604,6 +604,10 @@ class A2AServer:
             daemon=True,
         ).start()
 
+        if isinstance(parsed.configuration, dict) and parsed.configuration.get("blocking") is False:
+            task = self.task_store.get(task_id)
+            return jsonify({"jsonrpc": "2.0", "id": rpc_id, "result": task})
+
         self._wait_for_settle(task_id)
         final = self.task_store.get(task_id)
         return jsonify({"jsonrpc": "2.0", "id": rpc_id, "result": final})
