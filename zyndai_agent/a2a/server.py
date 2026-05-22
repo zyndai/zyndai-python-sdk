@@ -836,6 +836,17 @@ class A2AServer:
                 self._error_message(f"payload validation failed: {e}"),
             )
             return
+        except Exception as e:
+            # Non-Pydantic shape errors would otherwise kill the worker thread
+            # silently and leave the task stuck in 'working' until the
+            # 5-minute wait_for_settle timeout. Reject the task instead.
+            _log.exception("[a2a-server] inbound parse threw")
+            self.task_store.set_state(
+                task_id,
+                "rejected",
+                self._error_message(f"inbound parse failed: {e}"),
+            )
+            return
 
         auth = (message.get("metadata") or {}).get("x-zynd-auth") or {}
         handler_input = HandlerInput(
