@@ -85,6 +85,7 @@ class BuildCardOptions:
     category: Optional[str] = None
     tags: Optional[list[str]] = None
     summary: Optional[str] = None
+    wallet_address: Optional[str] = None
     logos: Optional[AgentLogos] = None
 
 
@@ -164,6 +165,7 @@ def build_agent_card(opts: BuildCardOptions) -> dict[str, Any]:
         ("category", opts.category),
         ("tags", opts.tags),
         ("summary", opts.summary),
+        ("walletAddress", opts.wallet_address),
     ):
         if v is not None:
             x_zynd[k] = v

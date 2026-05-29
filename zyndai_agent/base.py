@@ -253,6 +253,7 @@ class ZyndBase:
                 output_model=self.output_model,
                 fallback_provider=self._resolved_provider,
                 logos=self._detected_logos,
+                wallet_address=self.pay_to_address,
             )
 
         self._build_card = _build_card

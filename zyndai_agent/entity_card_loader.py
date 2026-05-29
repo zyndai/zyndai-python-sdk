@@ -185,6 +185,7 @@ def build_runtime_card(
     output_model: Optional[Type[BaseModel]] = None,
     fallback_provider: Optional[dict[str, Any]] = None,
     logos: Any = None,
+    wallet_address: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build the A2A-shaped agent card directly from a ZyndBaseConfig
     + runtime identity. Fully signed and ready to ship over the wire.
@@ -300,6 +301,7 @@ def build_runtime_card(
         pricing=pricing,
         category=getattr(config, "category", None),
         tags=getattr(config, "tags", None),
+        wallet_address=wallet_address,
     )
     return build_agent_card(opts)
 
