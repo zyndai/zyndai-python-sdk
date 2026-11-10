@@ -26,3 +26,5 @@ examples/http/linkedin-job-scraper/
 
 #personal test stuff
 top500agents/
+# Added by code-review-graph
+.code-review-graph/
