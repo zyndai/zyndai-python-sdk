@@ -40,8 +40,14 @@ from zyndai_agent import dns_registry as DNSRegistryClient
 from zyndai_agent import a2a
 from zyndai_agent.a2a.client import A2AClient
 from zyndai_agent.a2a.server import A2AServer
+from zyndai_agent.a2a.payment_gate import X402PaymentGate
+from zyndai_agent.a2a.payment_client import ClientPaymentOptions, PaymentRefusedError
 
 __all__ = [
+    # x402 (G19)
+    "X402PaymentGate",
+    "ClientPaymentOptions",
+    "PaymentRefusedError",
     # Core
     "ZyndBase",
     "ZyndBaseConfig",

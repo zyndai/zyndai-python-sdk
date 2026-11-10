@@ -41,6 +41,8 @@ from zyndai_agent.a2a.types import (
     ZYND_AUTH_FAILED,
     ZYND_REPLAY_DETECTED,
     ZYND_AUTH_EXPIRED,
+    ZYND_PAYMENT_REQUIRED,
+    ZYND_PAYMENT_UNAVAILABLE,
 )
 from zyndai_agent.a2a.auth import (
     sign_message,
@@ -69,6 +71,23 @@ from zyndai_agent.a2a.client import (
     resolve_transport,
     resolve_transport_from_card,
 )
+from zyndai_agent.a2a.payment_gate import (
+    X402PaymentGate,
+    PaymentRequiredError,
+    PaymentUnavailableError,
+    VerifiedPayment,
+    SettledPayment,
+    parse_price_usd,
+    DEFAULT_X402_NETWORK,
+    DEFAULT_X402_FACILITATOR_URL,
+    DEFAULT_PAYMENT_TIMEOUT_SECONDS,
+)
+from zyndai_agent.a2a.payment_client import (
+    A2APayer,
+    ClientPaymentOptions,
+    PaymentRefusedError,
+    DEFAULT_MAX_PAYMENT_USD,
+)
 from zyndai_agent.a2a.card import (
     build_agent_card,
     sign_agent_card,
@@ -78,6 +97,21 @@ from zyndai_agent.a2a.card import (
 )
 
 __all__ = [
+    "ZYND_PAYMENT_REQUIRED",
+    "ZYND_PAYMENT_UNAVAILABLE",
+    "X402PaymentGate",
+    "PaymentRequiredError",
+    "PaymentUnavailableError",
+    "VerifiedPayment",
+    "SettledPayment",
+    "parse_price_usd",
+    "DEFAULT_X402_NETWORK",
+    "DEFAULT_X402_FACILITATOR_URL",
+    "DEFAULT_PAYMENT_TIMEOUT_SECONDS",
+    "A2APayer",
+    "ClientPaymentOptions",
+    "PaymentRefusedError",
+    "DEFAULT_MAX_PAYMENT_USD",
     "canonical_json",
     "canonical_bytes",
     "Message",

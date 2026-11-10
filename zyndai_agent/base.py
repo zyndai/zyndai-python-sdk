@@ -25,6 +25,7 @@ from typing import Any, Callable, Optional, Type
 from pydantic import BaseModel, ConfigDict, Field
 
 from zyndai_agent import dns_registry
+from zyndai_agent.a2a.payment_gate import parse_price_usd
 from zyndai_agent.a2a.server import A2AServer, Handler, HandlerInput, TaskHandle
 from zyndai_agent.logo import AgentLogos, scan_logos
 from zyndai_agent.ed25519_identity import (
@@ -172,6 +173,15 @@ class ZyndBaseConfig(BaseModel):
     # Pricing
     price: Optional[str] = None
     entity_pricing: Optional[PricingConfig] = None
+    # Charge callers over x402 (G19). Off by default: `price` / `entity_pricing` only
+    # *advertise* a price until this is True (or env ZYND_ENFORCE_PAYMENT=1). Needs a price.
+    enforce_payment: Optional[bool] = None
+    # x402 facilitator. Default https://x402.org/facilitator; env X402_FACILITATOR_URL.
+    payment_facilitator_url: Optional[str] = None
+    # CAIP-2 network. Default eip155:84532 (Base Sepolia); env X402_NETWORK.
+    payment_network: Optional[str] = None
+    # Seconds a payer's signed authorization stays valid (must outlive the job). Default 600.
+    payment_timeout_seconds: Optional[int] = None
 
     # Limits
     message_history_limit: int = 100
@@ -274,11 +284,53 @@ class ZyndBase:
             fqan=config.fqan,
             assets_dir=self._get_assets_dir(),
             dev_mode=_is_dev,
+            payment=self._resolve_payment_gate(config),
         )
 
         # Heartbeat state.
         self._heartbeat_thread: Optional[threading.Thread] = None
         self._heartbeat_stop = threading.Event()
+
+    def _resolve_payment_gate(self, config: ZyndBaseConfig) -> Optional[dict[str, Any]]:
+        """G19: turn `price` / `entity_pricing` into x402 gate kwargs when payment is enforced.
+
+        Returns None for a free agent (the default), so existing agents behave as before an
+        upgrade.
+        """
+        enforce = config.enforce_payment
+        if enforce is None:
+            enforce = os.environ.get("ZYND_ENFORCE_PAYMENT", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+        if not enforce:
+            return None
+
+        price = parse_price_usd(
+            config.price
+            if config.price is not None
+            else config.entity_pricing.base_price_usd if config.entity_pricing else None
+        )
+        if price is None:
+            raise ValueError(
+                "enforce_payment is on but the agent has no price. Set `price` "
+                '(e.g. "$0.01") or `entity_pricing.base_price_usd`.'
+            )
+        kwargs: dict[str, Any] = {"price": price, "pay_to": self.pay_to_address}
+        network = config.payment_network or os.environ.get("X402_NETWORK")
+        facilitator_url = config.payment_facilitator_url or os.environ.get(
+            "X402_FACILITATOR_URL"
+        )
+        if network:
+            kwargs["network"] = network
+        if facilitator_url:
+            kwargs["facilitator_url"] = facilitator_url
+        if config.payment_timeout_seconds:
+            kwargs["max_timeout_seconds"] = config.payment_timeout_seconds
+        if config.description:
+            kwargs["description"] = config.description
+        return kwargs
 
     # -------------------------------------------------------------------------
     # Public API

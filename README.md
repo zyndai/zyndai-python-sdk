@@ -406,27 +406,46 @@ print(response.json()["response"])
 
 ## x402 Micropayments
 
-### Enable Payments
+### Charge callers
 
-Set `entity_pricing` in `*.config.json` or pass it to the config object:
+An agent can charge callers per request over [x402](https://x402.org) (v2, `exact` scheme, EVM; Base Sepolia test USDC by default). Setting a price only *advertises* it on the entity card; to actually charge, turn payment on:
 
-```json
-{
-  "entity_pricing": {
-    "model": "per_request",
-    "base_price_usd": 0.01,
-    "currency": "USDC",
-    "payment_methods": ["x402"],
-    "rates": {
-      "default": 0.01
-    }
-  }
-}
+```python
+agent = ZyndAIAgent(AgentConfig(
+    name="paid-agent",
+    price="$0.01",              # or entity_pricing={"base_price_usd": 0.01, "currency": "USDC"}
+    enforce_payment=True,       # or env ZYND_ENFORCE_PAYMENT=1
+))
 ```
 
-x402 middleware is automatically enabled on `/webhook/sync` when pricing is set.
+What a caller sees:
+
+1. A call with no payment gets **HTTP 402** and a `PAYMENT-REQUIRED` header (JSON-RPC error `-32103`) that says what to pay and to whom.
+2. The caller signs an EIP-3009 authorization and retries with `PAYMENT-SIGNATURE`. The server checks it with the facilitator **before** the job runs.
+3. The payment is **settled on chain only after the task completes**. A failed, cancelled or rejected task is never charged. A completed reply carries `PAYMENT-RESPONSE`, and `task["metadata"]["x402"]` holds `{settled, transaction, network, payer}` (also visible later through `tasks/get`, which is how you read it for `blocking=False` calls).
+4. A follow-up message on a task that is waiting in `input-required` rides on the first payment; it is not charged again. `message/stream` is gated the same way.
+
+The payee is the agent's own wallet (`agent.pay_to_address`). If settlement fails after the work was done, the result is withheld and the caller gets a 402.
+
+Payment is off unless you set `enforce_payment`, so upgrading never starts charging an existing agent. It needs a `price`, and is ignored in dev mode (`ZYND_DEV=1`), where callers are unauthenticated. For mainnet, set `payment_network`, `payment_facilitator_url` and a production facilitator; the default points at test USDC.
 
 ### Pay for Other Entities
+
+With the A2A client, payment is opt-in and capped. Give `A2AClient` a `payment` option and it answers a 402 once, up to a USD limit:
+
+```python
+from zyndai_agent import A2AClient, ClientPaymentOptions
+
+client = A2AClient(
+    keypair, entity_id,
+    payment=ClientPaymentOptions(max_payment_usd=0.25),   # default cap $0.10; payment=True for the defaults
+)
+reply = client.ask("https://paid-agent.example.com", "What is AAPL?")
+```
+
+The client pays from the wallet of its own identity (override with `ClientPaymentOptions(signer=...)`), refuses a price above the cap *before* signing anything (`PaymentRefusedError`), and only pays in stablecoins it knows are worth $1 (USDC on Base and Base Sepolia; add more with `assets={address: decimals}`). It re-signs the A2A message for the paid retry, so it also works against servers that check `x-zynd-auth` before payment, such as the Zynd n8n Gateway. Without `payment`, a 402 is raised as an ordinary error and nothing is signed.
+
+For plain HTTP endpoints, the processor still negotiates payment itself:
 
 ```python
 # Payment negotiation is automatic
@@ -515,8 +534,12 @@ Run each entity in a separate process or terminal.
 | `registry_url` | `str` | `"http://localhost:8080"` | Registry endpoint |
 | `auto_reconnect` | `bool` | `True` | Reconnect on disconnect |
 | `keypair_path` | `str` | `None` | Path to Ed25519 keypair JSON |
-| `price` | `str` | `None` | Legacy x402 price string (auto-derived from `entity_pricing`) |
+| `price` | `str` | `None` | Price per call, e.g. `"$0.01"`. Advertised on the card; **charged only when `enforce_payment` is on** |
 | `entity_pricing` | `dict` | `None` | Structured pricing (model, currency, rates, payment_methods) |
+| `enforce_payment` | `bool` | `None` (off) | Require an x402 payment for every new task ([details](#charge-callers)). Env: `ZYND_ENFORCE_PAYMENT=1` |
+| `payment_facilitator_url` | `str` | `https://x402.org/facilitator` | x402 facilitator. Env: `X402_FACILITATOR_URL` |
+| `payment_network` | `str` | `eip155:84532` | CAIP-2 network (Base Sepolia). Env: `X402_NETWORK` |
+| `payment_timeout_seconds` | `int` | `600` | How long a payer's signed authorization stays valid (must outlive the job) |
 | `use_ngrok` | `bool` | `False` | Enable ngrok tunnel |
 | `ngrok_auth_token` | `str` | `None` | Ngrok auth token |
 | `card_output` | `str` | `None` | Output path for Entity Card |
@@ -547,6 +570,9 @@ Run each entity in a separate process or terminal.
 | `ZYND_WEBHOOK_PORT` | Override webhook port (takes precedence over config) |
 | `ZYND_HOME` | Override `~/.zynd/` directory |
 | `NGROK_AUTH_TOKEN` | Ngrok auth token |
+| `ZYND_ENFORCE_PAYMENT` | `1` to charge callers the agent's `price` over x402 |
+| `X402_FACILITATOR_URL` | x402 facilitator URL (default `https://x402.org/facilitator`) |
+| `X402_NETWORK` | x402 network, CAIP-2 (default `eip155:84532`, Base Sepolia) |
 
 ## Examples
 
