@@ -16,8 +16,9 @@ import logging
 import threading
 import time
 import uuid
+from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Type
+from typing import Any, Callable, Optional, Type, Union
 
 import requests
 from flask import Blueprint, Flask, Response, request, stream_with_context
@@ -37,6 +38,13 @@ from zyndai_agent.a2a.auth import (
     sign_message,
     verify_message,
 )
+from zyndai_agent.a2a.payment_gate import (
+    PaymentRequiredError,
+    PaymentUnavailableError,
+    SettledPayment,
+    VerifiedPayment,
+    X402PaymentGate,
+)
 from zyndai_agent.a2a.task_store import TaskStore
 from zyndai_agent.a2a.types import (
     A2A_TASK_NOT_CANCELABLE,
@@ -50,6 +58,8 @@ from zyndai_agent.a2a.types import (
     TERMINAL_STATES,
     ZYND_AUTH_EXPIRED,
     ZYND_AUTH_FAILED,
+    ZYND_PAYMENT_REQUIRED,
+    ZYND_PAYMENT_UNAVAILABLE,
     ZYND_REPLAY_DETECTED,
     MessageSendParams,
     TaskIdParams,
@@ -281,7 +291,16 @@ class A2AServer:
         flask_app: Optional[Flask] = None,
         assets_dir: Optional[str] = None,
         dev_mode: bool = False,
+        payment: Union[X402PaymentGate, dict[str, Any], None] = None,
     ) -> None:
+        """
+        `payment` (G19): an `X402PaymentGate`, or the kwargs to build one
+        (`price`, `pay_to`, `network`, `facilitator_url`, ...). When set,
+        `message/send` and `message/stream` that start a new task answer HTTP 402
+        until the caller attaches a valid `PAYMENT-SIGNATURE`; the payment is
+        settled only after the task completes. Ignored (with a warning) in dev
+        mode, where callers are unauthenticated.
+        """
         self.entity_id = entity_id
         self.keypair = keypair
         self.agent_card_builder = agent_card_builder
@@ -299,6 +318,21 @@ class A2AServer:
 
         self.task_store = TaskStore(idle_ttl_seconds=idle_ttl_seconds)
         self.replay_cache = ReplayCache()
+
+        # x402 gate, or None when the agent is free.
+        if payment is not None and dev_mode:
+            _log.warning("[a2a-server] payment gate ignored: dev mode accepts unauthenticated callers")
+            payment = None
+        self.gate: Optional[X402PaymentGate] = (
+            payment if isinstance(payment, X402PaymentGate)
+            else X402PaymentGate(**payment) if payment
+            else None
+        )
+        self._pay_lock = threading.Lock()
+        # Verified-but-unsettled payments, by task id.
+        self._pending_payments: dict[str, VerifiedPayment] = {}
+        # In-flight / finished settlement per task, so concurrent callers settle exactly once.
+        self._settlements: dict[str, "Future[Optional[SettledPayment]]"] = {}
 
         self._handler: Optional[Handler] = None
         self._assets_dir = assets_dir
@@ -557,6 +591,16 @@ class A2AServer:
             if raw_meta:
                 message.setdefault("metadata", {}).update(raw_meta)
 
+        # x402 (G19). A message that resumes a parked task rides on the payment already
+        # taken for it. The unpaid challenge is answered *before* x-zynd-auth is checked,
+        # so a caller can retry the same signed message with a payment attached without
+        # tripping the replay cache.
+        existing = self.task_store.get(message["taskId"]) if message.get("taskId") else None
+        resuming = bool(existing) and existing["status"]["state"] in INTERRUPTED_STATES
+        needs_payment = self.gate is not None and not resuming
+        if needs_payment and not self.gate.has_payment(request.headers):
+            return self._payment_reply(rpc_id, lambda: self.gate.challenge(self._resource_url()))
+
         # Verify x-zynd-auth.
         try:
             auth_ctx = verify_message(
@@ -571,6 +615,20 @@ class A2AServer:
                 else ZYND_AUTH_FAILED
             )
             return jsonify(self._rpc_error(rpc_id, code, str(e)))
+
+        # x402: check the proof (facilitator /verify) before any task exists, so a 402
+        # leaves no trace.
+        verified: Optional[VerifiedPayment] = None
+        if needs_payment:
+            box: list[VerifiedPayment] = []
+
+            def _verify() -> None:
+                box.append(self.gate.verify(request.headers, self._resource_url()))
+
+            denied = self._payment_reply(rpc_id, _verify)
+            if denied is not None:
+                return denied
+            verified = box[0]
 
         task_id = message.get("taskId") or self.task_store.new_task_id()
         context_id = message.get("contextId") or self.task_store.new_context_id()
@@ -589,8 +647,15 @@ class A2AServer:
                 self._wait_for_settle(task_id)
                 final = self.task_store.get(task_id)
                 return jsonify({"jsonrpc": "2.0", "id": rpc_id, "result": final})
+            # Parked but not resumable, so this would start fresh work: it needs its own payment.
+            if self.gate is not None and verified is None:
+                return self._payment_reply(
+                    rpc_id, lambda: self.gate.challenge(self._resource_url())
+                )
 
         # Fresh dispatch.
+        if verified is not None:
+            self._hold_payment(task_id, verified)
         self.task_store.append_message(task_id, message)
         self.task_store.set_state(task_id, "working")
 
@@ -604,12 +669,35 @@ class A2AServer:
             daemon=True,
         ).start()
 
+        # blocking=False returns at once. The payment is settled when the task completes;
+        # the transaction lands in `task["metadata"]["x402"]` (see tasks/get).
         if isinstance(parsed.configuration, dict) and parsed.configuration.get("blocking") is False:
             task = self.task_store.get(task_id)
             return jsonify({"jsonrpc": "2.0", "id": rpc_id, "result": task})
 
         self._wait_for_settle(task_id)
         final = self.task_store.get(task_id)
+
+        # Terminal + paid: take the money now so the reply can carry PAYMENT-RESPONSE. A task
+        # parked in input-required keeps its payment until it finishes (_dispatch settles then).
+        if verified is not None and final and final["status"]["state"] in TERMINAL_STATES:
+            settled = self._settle_task(task_id)
+            if settled is not None and not settled.success:
+                # Do not hand over the result of work the caller did not pay for.
+                reason = settled.error_reason or "settle_failed"
+
+                def _fail() -> PaymentRequiredError:
+                    return self.gate.challenge(
+                        self._resource_url(), "Payment settlement failed", reason
+                    )
+
+                return self._payment_reply(rpc_id, _fail)
+            reply = jsonify(
+                {"jsonrpc": "2.0", "id": rpc_id, "result": self.task_store.get(task_id) or final}
+            )
+            if settled is not None:
+                reply.headers["PAYMENT-RESPONSE"] = settled.header
+            return reply
         return jsonify({"jsonrpc": "2.0", "id": rpc_id, "result": final})
 
     def _maybe_set_inline_push_config(
@@ -655,6 +743,11 @@ class A2AServer:
             if raw_meta:
                 message.setdefault("metadata", {}).update(raw_meta)
 
+        # x402 (G19): same gate as message/send. A stream always starts a task, so it always
+        # pays. The 402 has to go out before the SSE response does.
+        if self.gate is not None and not self.gate.has_payment(request.headers):
+            return self._payment_reply(rpc_id, lambda: self.gate.challenge(self._resource_url()))
+
         try:
             auth_ctx = verify_message(
                 message, mode=self.auth_mode, replay_cache=self.replay_cache
@@ -662,9 +755,23 @@ class A2AServer:
         except ZyndAuthError as e:
             return jsonify(self._rpc_error(rpc_id, ZYND_AUTH_FAILED, str(e)))
 
+        verified: Optional[VerifiedPayment] = None
+        if self.gate is not None:
+            box: list[VerifiedPayment] = []
+
+            def _verify() -> None:
+                box.append(self.gate.verify(request.headers, self._resource_url()))
+
+            denied = self._payment_reply(rpc_id, _verify)
+            if denied is not None:
+                return denied
+            verified = box[0]
+
         task_id = message.get("taskId") or self.task_store.new_task_id()
         context_id = message.get("contextId") or self.task_store.new_context_id()
         self.task_store.get_or_create(task_id, context_id)
+        if verified is not None:
+            self._hold_payment(task_id, verified)
         self.task_store.append_message(task_id, message)
 
         # Inline pushNotificationConfig — same shortcut as message/send.
@@ -847,6 +954,27 @@ class A2AServer:
         message: dict[str, Any],
         auth_ctx: dict[str, Any],
     ) -> None:
+        try:
+            self._run_handler(task_id, context_id, message, auth_ctx)
+        finally:
+            # The handler call spans the whole task, including any input-required waits,
+            # so this is the one place every outcome (completed, failed, cancelled, no
+            # handler) passes through.
+            with self._pay_lock:
+                held = task_id in self._pending_payments
+            if held:
+                try:
+                    self._settle_task(task_id)
+                except Exception:
+                    _log.exception("[a2a-server] x402 settle threw")
+
+    def _run_handler(
+        self,
+        task_id: str,
+        context_id: str,
+        message: dict[str, Any],
+        auth_ctx: dict[str, Any],
+    ) -> None:
         if self._handler is None:
             self.task_store.set_state(
                 task_id,
@@ -978,6 +1106,128 @@ class A2AServer:
         if data is not None:
             err["data"] = data
         return {"jsonrpc": "2.0", "id": rpc_id, "error": err}
+
+    # -------------------------------------------------------------------------
+    # x402 payments (G19)
+    # -------------------------------------------------------------------------
+
+    def _resource_url(self) -> str:
+        """Public URL of the A2A endpoint, quoted back to the payer in the 402 challenge."""
+        try:
+            url = (self.agent_card_builder() or {}).get("url")
+        except Exception:
+            url = None
+        if isinstance(url, str) and url:
+            return url
+        return f"{request.url_root.rstrip('/')}{self.a2a_path}"
+
+    def _payment_reply(self, rpc_id: Any, fn: Callable[[], Any]) -> Optional[Response]:
+        """Run a payment step and turn its failure into an HTTP reply.
+
+        `fn` may raise PaymentRequiredError / PaymentUnavailableError, or return a
+        PaymentRequiredError to send. Returns the reply to send, or None when the step
+        passed (nothing to send).
+        """
+        from flask import jsonify
+
+        try:
+            err = fn()
+        except PaymentRequiredError as e:
+            err = e
+        except PaymentUnavailableError as e:
+            body = self._rpc_error(rpc_id, ZYND_PAYMENT_UNAVAILABLE, str(e))
+            resp = jsonify(body)
+            resp.status_code = 503
+            return resp
+        if err is None:
+            return None
+        body = self._rpc_error(
+            rpc_id,
+            ZYND_PAYMENT_REQUIRED,
+            str(err),
+            {
+                "reason": err.reason,
+                "x402": err.challenge.model_dump(by_alias=True, exclude_none=True),
+            },
+        )
+        resp = jsonify(body)
+        resp.status_code = 402
+        resp.headers["PAYMENT-REQUIRED"] = err.header
+        return resp
+
+    def _hold_payment(self, task_id: str, verified: VerifiedPayment) -> None:
+        """Remember a verified payment until the task it paid for finishes."""
+        with self._pay_lock:
+            self._settlements.pop(task_id, None)
+            self._pending_payments[task_id] = verified
+
+    def _settle_task(self, task_id: str) -> Optional[SettledPayment]:
+        """Charge for a task once it is `completed`; release the proof for any other outcome.
+
+        Safe to call from several threads: the settlement runs once and every caller gets the
+        same result. Returns None when there is nothing to settle (free agent, or the task
+        did not complete).
+        """
+        gate = self.gate
+        with self._pay_lock:
+            fut = self._settlements.get(task_id)
+            verified = self._pending_payments.get(task_id)
+            if fut is None:
+                if gate is None or verified is None:
+                    return None
+                fut = Future()
+                self._settlements[task_id] = fut
+                owner = True
+            else:
+                owner = False
+        if not owner:
+            return fut.result()
+
+        assert gate is not None and verified is not None
+        try:
+            task = self.task_store.get(task_id)
+            state = (task or {}).get("status", {}).get("state")
+            if state != "completed":
+                gate.release(verified)
+                settled = None
+            else:
+                settled = gate.settle(verified)
+                self.task_store.set_metadata(
+                    task_id,
+                    {
+                        "x402": {
+                            "settled": True,
+                            "transaction": settled.transaction,
+                            "network": settled.network,
+                            "payer": settled.payer,
+                        }
+                        if settled.success
+                        else {"settled": False, "error": settled.error_reason or "settle_failed"}
+                    },
+                )
+                if not settled.success:
+                    _log.error(
+                        "[a2a-server] x402 settlement failed for task %s: %s",
+                        task_id,
+                        settled.error_reason or "unknown",
+                    )
+            fut.set_result(settled)
+        except BaseException as e:
+            fut.set_exception(e)
+            raise
+        finally:
+            with self._pay_lock:
+                self._pending_payments.pop(task_id, None)
+            # Keep the result around briefly for late callers, then forget it.
+            timer = threading.Timer(5 * 60, self._forget_settlement, args=(task_id, fut))
+            timer.daemon = True
+            timer.start()
+        return settled
+
+    def _forget_settlement(self, task_id: str, fut: "Future[Any]") -> None:
+        with self._pay_lock:
+            if self._settlements.get(task_id) is fut:
+                del self._settlements[task_id]
 
     def _wait_for_settle(self, task_id: str, max_seconds: float = 5 * 60) -> None:
         """Block until the task reaches a terminal or interrupted state."""

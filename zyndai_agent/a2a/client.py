@@ -18,6 +18,7 @@ from zyndai_agent.a2a.adapter import (
     to_a2a_message,
 )
 from zyndai_agent.a2a.auth import sign_message
+from zyndai_agent.a2a.payment_client import A2APayer, ClientPaymentOptions
 from zyndai_agent.ed25519_identity import Ed25519Keypair
 
 
@@ -44,12 +45,58 @@ class A2AClient:
         fqan: Optional[str] = None,
         developer_proof: Optional[dict[str, Any]] = None,
         timeout: float = 5 * 60,
+        payment: "ClientPaymentOptions | bool | None" = None,
     ) -> None:
+        """
+        `payment`: pay x402 challenges (HTTP 402) automatically, once per call, up to
+        `max_payment_usd` (default $0.10). Off unless set: without it a paid agent's 402 is
+        raised as an error and nothing is signed. Pass `True` for the defaults, which pay from
+        the wallet derived from `keypair`, or a `ClientPaymentOptions`.
+        """
         self.keypair = keypair
         self.entity_id = entity_id
         self.fqan = fqan
         self.developer_proof = developer_proof
         self.timeout = timeout
+        self._payer: Optional[A2APayer] = (
+            A2APayer(keypair, None if payment is True else payment) if payment else None
+        )
+
+    def _post(
+        self,
+        url: str,
+        make_body: Any,
+        *,
+        headers: dict[str, str],
+        timeout: float,
+        stream: bool = False,
+    ) -> requests.Response:
+        """POST that survives an x402 challenge: on HTTP 402, if payment is enabled, sign the
+        server's requirements and send the call once more with `PAYMENT-SIGNATURE`.
+
+        `make_body` is called again for the retry so the A2A message is signed afresh. Some
+        servers (the Zynd n8n Gateway among them) check `x-zynd-auth` before payment and burn
+        its nonce on the unpaid attempt, so resending the same signed message would be
+        refused as a replay.
+        """
+        first = requests.post(
+            url, json=make_body(), headers=headers, timeout=timeout, stream=stream
+        )
+        if first.status_code != 402 or self._payer is None:
+            return first
+        try:
+            challenge = first.json()
+        except ValueError:
+            challenge = None
+        paid = self._payer.answer(first.headers, challenge)
+        first.close()
+        return requests.post(
+            url,
+            json=make_body(),
+            headers={**headers, **paid},
+            timeout=timeout,
+            stream=stream,
+        )
 
     # -------------------------------------------------------------------------
     # Sync — single request/response, returns final Task dict.
@@ -87,27 +134,28 @@ class A2AClient:
                 timeout=timeout,
             )
 
-        message = self._build_message(
-            text=text,
-            data=data,
-            attachments=attachments,
-            task_id=task_id,
-            context_id=context_id,
-        )
-        rpc = {
-            "jsonrpc": "2.0",
-            "id": str(uuid.uuid4()),
-            "method": "message/send",
-            "params": {
-                "message": message,
-                "configuration": {"blocking": blocking},
-            },
-        }
-        resp = requests.post(
+        def make_body() -> dict[str, Any]:
+            return {
+                "jsonrpc": "2.0",
+                "id": str(uuid.uuid4()),
+                "method": "message/send",
+                "params": {
+                    "message": self._build_message(
+                        text=text,
+                        data=data,
+                        attachments=attachments,
+                        task_id=task_id,
+                        context_id=context_id,
+                    ),
+                    "configuration": {"blocking": blocking},
+                },
+            }
+
+        resp = self._post(
             url,
-            json=rpc,
-            timeout=timeout or self.timeout,
+            make_body,
             headers={"Content-Type": "application/json"},
+            timeout=timeout or self.timeout,
         )
         if not resp.ok:
             raise RuntimeError(f"A2A sync HTTP {resp.status_code}: {resp.text}")
@@ -135,19 +183,23 @@ class A2AClient:
     ) -> dict[str, Any]:
         """HTTP+JSON transport — POSTs MessageSendParams directly (no JSON-RPC
         envelope) and expects a Task or Message body back."""
-        message = self._build_message(
-            text=text,
-            data=data,
-            attachments=attachments,
-            task_id=task_id,
-            context_id=context_id,
-        )
-        params = {"message": message, "configuration": {"blocking": blocking}}
-        resp = requests.post(
+        def make_body() -> dict[str, Any]:
+            return {
+                "message": self._build_message(
+                    text=text,
+                    data=data,
+                    attachments=attachments,
+                    task_id=task_id,
+                    context_id=context_id,
+                ),
+                "configuration": {"blocking": blocking},
+            }
+
+        resp = self._post(
             url,
-            json=params,
-            timeout=timeout or self.timeout,
+            make_body,
             headers={"Content-Type": "application/json", "Accept": "application/json"},
+            timeout=timeout or self.timeout,
         )
         if not resp.ok:
             raise RuntimeError(
@@ -191,22 +243,25 @@ class A2AClient:
         """Send `message/stream` and yield events until the SSE stream
         closes (typically a status-update with final=True).
         """
-        message = self._build_message(
-            text=text,
-            data=data,
-            attachments=attachments,
-            task_id=task_id,
-            context_id=context_id,
-        )
-        rpc = {
-            "jsonrpc": "2.0",
-            "id": str(uuid.uuid4()),
-            "method": "message/stream",
-            "params": {"message": message},
-        }
-        with requests.post(
+        def make_body() -> dict[str, Any]:
+            return {
+                "jsonrpc": "2.0",
+                "id": str(uuid.uuid4()),
+                "method": "message/stream",
+                "params": {
+                    "message": self._build_message(
+                        text=text,
+                        data=data,
+                        attachments=attachments,
+                        task_id=task_id,
+                        context_id=context_id,
+                    )
+                },
+            }
+
+        with self._post(
             url,
-            json=rpc,
+            make_body,
             stream=True,
             timeout=timeout or 30 * 60,
             headers={

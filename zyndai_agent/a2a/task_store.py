@@ -217,6 +217,16 @@ class TaskStore:
             }
         self._broadcast(entry, event)
 
+    def set_metadata(self, task_id: str, patch: dict[str, Any]) -> None:
+        """Merge keys into `task["metadata"]` (e.g. the x402 settlement). No event is emitted."""
+        with self._lock:
+            entry = self._tasks.get(task_id)
+            if entry is None:
+                return
+        with entry.lock:
+            entry.task["metadata"] = {**(entry.task.get("metadata") or {}), **patch}
+            entry.last_activity = time.time()
+
     def append_message(self, task_id: str, message: dict[str, Any]) -> None:
         with self._lock:
             entry = self._tasks.get(task_id)

@@ -202,6 +202,10 @@ A2A_AUTHENTICATED_EXTENDED_CARD_NOT_CONFIGURED = -32007
 ZYND_AUTH_FAILED = -32100
 ZYND_REPLAY_DETECTED = -32101
 ZYND_AUTH_EXPIRED = -32102
+# x402: the call needs a payment (HTTP 402). `error.data` carries the challenge.
+ZYND_PAYMENT_REQUIRED = -32103
+# x402: the facilitator could not be reached, so a payment could not be checked (HTTP 503).
+ZYND_PAYMENT_UNAVAILABLE = -32104
 
 
 # -----------------------------------------------------------------------------
