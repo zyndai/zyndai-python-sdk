@@ -546,6 +546,7 @@ Run each entity in a separate process or terminal.
 | `ZYND_REGISTRY_URL` | Default registry endpoint |
 | `ZYND_WEBHOOK_PORT` | Override webhook port (takes precedence over config) |
 | `ZYND_HOME` | Override `~/.zynd/` directory |
+| `ZYND_LEGACY_WALLET_DERIVATION` | `1` to keep the pre-0.8.0 wallet address (the raw Ed25519 seed as the EVM key). The default is now `SHA-256(seed)`, the same address the TypeScript SDK and the n8n Gateway use for the same identity |
 | `NGROK_AUTH_TOKEN` | Ngrok auth token |
 
 ## Examples
